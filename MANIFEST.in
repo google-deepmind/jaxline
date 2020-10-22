@@ -1,0 +1,6 @@
+include LICENSE
+include WORKSPACE
+include CONTRIBUTING.md
+include README.md
+include requirements*.txt
+recursive-include . *BUILD

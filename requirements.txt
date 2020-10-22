@@ -1,0 +1,5 @@
+absl-py>=0.7.1
+chex>=0.0.2
+ml_collections>=0.1
+numpy>=1.18.0
+wrapt>=1.11.2

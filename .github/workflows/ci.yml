@@ -1,0 +1,62 @@
+---
+name: ci
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+  release:
+    types: [created]
+
+jobs:
+  build-and-test:
+    name: "Python ${{ matrix.python-version }} on ${{ matrix.os }}"
+    runs-on: "${{ matrix.os }}"
+
+    strategy:
+      matrix:
+        python-version: ["3.6", "3.7", "3.8"]
+        os: [macos-latest, ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: "actions/checkout@v2"
+      - uses: "actions/setup-python@v1"
+        with:
+            python-version: "${{ matrix.python-version }}"
+      - name: "Install dependencies"
+        run: |
+          set -xe
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install pytest
+          python -m pip install -r requirements-test.txt
+        shell: bash
+      - name: "Build"
+        run: |
+          if [[ `uname` == "Darwin" ]]
+          then
+            echo "build --macos_minimum_os=10.9" >> ${HOME}/.bazelrc
+          fi
+          set -xe
+          python -VV
+          bazel --version
+          python setup.py sdist
+          pip wheel --verbose --no-deps --no-clean dist/jaxline*.tar.gz
+          pip install dm_tree*.whl
+        shell: bash
+      - name: "Run tests"
+        run: |
+          set -xe
+          # Change directory to avoid importing jaxline from repo root.
+          mkdir tests && pushd tests
+          python -m pytest -vv --pyargs jaxline
+          popd
+        shell: bash
+      - uses: actions/upload-artifact@v2
+        if: ${{ github.event_name == 'release' && github.event.action == 'created' }}
+        with:
+          path: jaxline*.whl
+      - uses: actions/upload-artifact@v2
+        if: ${{ github.event_name == 'release' && github.event.action == 'created' }}
+        with:
+          path: dist/jaxline*.tar.gz
