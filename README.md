@@ -26,6 +26,26 @@ JAXline too, depending on their particular use case.
 
 ## Quickstart
 
+### Installation
+
+JAXline is written in pure Python, but depends on C++ code via JAX and
+TensorFlow (the latter is used for writing summaries).
+
+Because JAX / TensorFlow installation is different depending on your CUDA
+version, JAXline does not list JAX or TensorFlow as a dependencies in
+`requirements.txt`.
+
+First, follow the instructions to install
+[JAX](https://github.com/google/jax#installation) and
+[TensorFlow](https://github.com/tensorflow/tensorflow#install)
+respectively with the relevant accelerator support.
+
+Then, install JAXline using pip:
+
+```bash
+$ pip install git+https://github.com/deepmind/jaxline
+```
+
 ### Building your own experiment
 
 1.  Create an `experiment.py` file and inside it define an `Experiment` class
