@@ -17,7 +17,7 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.6", "3.7", "3.8"]
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest, ubuntu-latest]
 
     steps:
       - uses: "actions/checkout@v2"
@@ -29,7 +29,6 @@ jobs:
           set -xe
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install pytest
-          python -m pip install -r requirements-test.txt
         shell: bash
       - name: "Build"
         run: |
@@ -42,7 +41,7 @@ jobs:
           bazel --version
           python setup.py sdist
           pip wheel --verbose --no-deps --no-clean dist/jaxline*.tar.gz
-          pip install dm_tree*.whl
+          pip install jaxline*.whl
         shell: bash
       - name: "Run tests"
         run: |
