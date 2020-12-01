@@ -15,7 +15,7 @@
 """Base classes for training JAXline experiments.
 
 Any class that implements this interface is compatible with
-the Jaxline Distributed Training system.
+the JAXline Distributed Training system.
 """
 import abc
 import functools
@@ -35,9 +35,11 @@ class AbstractExperiment(abc.ABC):
   """The base class for training JAXline experiments."""
 
   # A dict mapping attributes of this class to a name they are stored under.
+  #
   # Pmapped attributes should be included in CHECKPOINT_ATTRS and will be
   # assumed to have a leading dimension corresponding to the pmapped axis when
-  # Saving and restoring.
+  # saving and restoring.
+  #
   # Non-pmapped attributes should be included in NON_BROADCAST_CHECKPOINT_ATTRS
   # and will be assumed to have no such leading dimension.
   CHECKPOINT_ATTRS = {}
@@ -64,12 +66,12 @@ class AbstractExperiment(abc.ABC):
     they want e.g. def step(self, global_step, **unused_args).
 
     Args:
-      global_step: A `SharededDeviceArray` of the global step, one copy
+      global_step: A `ShardedDeviceArray` of the global step, one copy
         for each local device.
       rng: A `ShardedDeviceArray` of `PRNGKey`s, one for each local device,
         and unique to the global_step. The relationship between the keys is set
         by config.random_mode_train.
-      writer: A optional writer for performing additional logging (note that
+      writer: An optional writer for performing additional logging (note that
         logging of the returned scalars is performed automatically by
         jaxline/train.py)
 
@@ -88,13 +90,13 @@ class AbstractExperiment(abc.ABC):
     they want e.g. def evaluate(self, global_step, **unused_args).
 
     Args:
-      global_step: A `SharededDeviceArray` of the global step, one copy
+      global_step: A `ShardedDeviceArray` of the global step, one copy
         for each local device.
       rng: A `ShardedDeviceArray` of random keys, one for each local device,
         and, unlike in the step function, *independent* of the global step (i.e.
         the same array of keys is passed at every call to the function). The
         relationship between the keys is set by config.random_mode_eval.
-      writer: A optional writer for performing additional logging (note that
+      writer: An optional writer for performing additional logging (note that
         logging of the returned scalars is performed automatically by
         jaxline/train.py)
 
@@ -153,7 +155,7 @@ class AbstractExperiment(abc.ABC):
     """Takes a frozen copy of the current experiment state for checkpointing.
 
     Returns:
-      a mapping from experiment attributes to names to stored under in the
+      A mapping from experiment attributes to names to stored under in the
         snapshot.
     """
     snapshot_state = {}
