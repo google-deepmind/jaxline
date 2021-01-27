@@ -12,6 +12,9 @@ exports_files(["LICENSE"])
 package_group(
     name = "friends",
     includes = ["//learning/deepmind:visibility"],
+    packages = [
+        "//medical/imaging/...",
+    ],
 )
 
 py_library(
@@ -91,7 +94,7 @@ py_library(
         # absl/logging
         # chex
         # jax
-        # ml_collections
+        # ml_collections/config_dict
         # ml_collections/config_flags
         # numpy
         # tensorflow
