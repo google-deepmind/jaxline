@@ -16,8 +16,7 @@
 
 from concurrent import futures
 import os
-
-from typing import Any, Mapping, Text
+from typing import Any, Mapping
 
 from absl import flags
 from absl import logging
@@ -28,8 +27,8 @@ import jax
 from jaxline import base_config
 from jaxline import train
 from jaxline import utils
+from ml_collections import config_dict
 from ml_collections import config_flags
-from ml_collections import configdict
 import numpy as np
 
 import tensorflow as tf
@@ -43,15 +42,16 @@ config_flags.DEFINE_config_file(
 # This flag is expected to be used only internally by jaxline.
 # It is prefixed by "jaxline" to prevent a conflict with a "mode" flag defined
 # by Monarch.
-flags.DEFINE_string(
+_JAXLINE_MODE = flags.DEFINE_string(
     "jaxline_mode", "train",
     ("Execution mode: `train` will run training, `eval` will run evaluation."))
-flags.DEFINE_string("jaxline_tpu_driver", "", "Whether to use tpu_driver.")
-flags.DEFINE_bool("jaxline_ensure_tpu", False,
-                  "Whether to ensure we have a TPU connected.")
+_JAXLINE_TPU_DRIVER = flags.DEFINE_string("jaxline_tpu_driver", "",
+                                          "Whether to use tpu_driver.")
+_JAXLINE_ENSURE_TPU = flags.DEFINE_bool(
+    "jaxline_ensure_tpu", False, "Whether to ensure we have a TPU connected.")
 
 
-def create_checkpointer(config: configdict.ConfigDict, mode: Text) -> Any:
+def create_checkpointer(config: config_dict.ConfigDict, mode: str) -> Any:
   """Creates an object to be used as a checkpointer."""
   return utils.InMemoryCheckpointer(config, mode)
 
@@ -59,12 +59,12 @@ def create_checkpointer(config: configdict.ConfigDict, mode: Text) -> Any:
 class TensorBoardLogger:
   """Writer to write experiment data to stdout."""
 
-  def __init__(self, config, mode):
+  def __init__(self, config, mode: str):
     """Initializes the writer."""
     log_dir = os.path.join(config.checkpoint_dir, mode)
     self._writer = tf.summary.create_file_writer(log_dir)
 
-  def write_scalars(self, global_step: int, scalars: Mapping[Text, Any]):
+  def write_scalars(self, global_step: int, scalars: Mapping[str, Any]):
     """Writes scalars to stdout."""
     global_step = int(global_step)
     with self._writer.as_default():
@@ -72,7 +72,7 @@ class TensorBoardLogger:
         tf.summary.scalar(k, v, step=global_step)
     self._writer.flush()
 
-  def write_images(self, global_step: int, images: Mapping[Text, np.ndarray]):
+  def write_images(self, global_step: int, images: Mapping[str, np.ndarray]):
     """Writes images to writers that support it."""
     global_step = int(global_step)
     with self._writer.as_default():
@@ -84,7 +84,7 @@ class TensorBoardLogger:
     self._writer.flush()
 
 
-def create_writer(config: configdict.ConfigDict, mode: Text) -> Any:
+def create_writer(config: config_dict.ConfigDict, mode: str) -> Any:
   """Creates an object to be used as a writer."""
   return TensorBoardLogger(config, mode)
 
@@ -103,12 +103,12 @@ def main(experiment_class, argv):
   # Make sure the required fields are available in the config.
   base_config.validate_config(FLAGS.config)
 
-  if FLAGS.jaxline_tpu_driver:
+  if _JAXLINE_TPU_DRIVER.value:
     jax.config.update("jax_xla_backend", "tpu_driver")
-    jax.config.update("jax_backend_target", FLAGS.jaxline_tpu_driver)
-    logging.info("Backend: %s %r", FLAGS.jaxline_tpu_driver, jax.devices())
+    jax.config.update("jax_backend_target", _JAXLINE_TPU_DRIVER.value)
+    logging.info("Backend: %s %r", _JAXLINE_TPU_DRIVER.value, jax.devices())
 
-  if FLAGS.jaxline_ensure_tpu:
+  if _JAXLINE_ENSURE_TPU.value:
     # JAX currently falls back to CPU if it cannot register the TPU platform.
     # In multi-host setups this can happen if we timeout waiting for hosts to
     # come back up at startup or after pre-emption. This test will crash the
@@ -118,18 +118,19 @@ def main(experiment_class, argv):
     chex.assert_tpu_available()
   config = FLAGS.config
 
-  if FLAGS.jaxline_mode == "train":
+  jaxline_mode = _JAXLINE_MODE.value
+  if jaxline_mode == "train":
     # Run training.
-    checkpointer = create_checkpointer(config, FLAGS.jaxline_mode)
-    writer = create_writer(config, FLAGS.jaxline_mode)
+    checkpointer = create_checkpointer(config, jaxline_mode)
+    writer = create_writer(config, jaxline_mode)
     train.train(experiment_class, config, checkpointer, writer)
-  elif FLAGS.jaxline_mode.startswith("eval"):
+  elif jaxline_mode.startswith("eval"):
     # Run evaluation.
-    checkpointer = create_checkpointer(config, FLAGS.jaxline_mode)
-    writer = create_writer(config, FLAGS.jaxline_mode)
+    checkpointer = create_checkpointer(config, jaxline_mode)
+    writer = create_writer(config, jaxline_mode)
     train.evaluate(experiment_class, config, checkpointer, writer,
-                   FLAGS.jaxline_mode)
-  elif FLAGS.jaxline_mode == "train_eval_multithreaded":
+                   jaxline_mode)
+  elif jaxline_mode == "train_eval_multithreaded":
     pool = futures.ThreadPoolExecutor(1)
 
     # Run training in a background thread!
@@ -145,4 +146,4 @@ def main(experiment_class, argv):
     # If we're here, eval has finished. Wait for train to finish!
     pool.shutdown()
   else:
-    raise ValueError(f"Mode {FLAGS.jaxline_mode} not recognized.")
+    raise ValueError(f"Mode {jaxline_mode} not recognized.")

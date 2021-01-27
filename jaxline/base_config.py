@@ -76,10 +76,16 @@ def get_base_config():
   config.random_seed = 42
   config.random_mode_train = "unique_host_unique_device"
   config.random_mode_eval = "same_host_same_device"
+
   # The metric (returned by the step function) used as a fitness score.
-  # It always assumes higher is better, and saves a separate series of
-  # checkpoints corresponding to checkpoints which produce a fitness score
-  # higher than previously seen. If empty (the default) this is disabled.
+  # It saves a separate series of checkpoints corresponding to
+  # those which produce a better fitness score than previously seen.
+  # By default it is assumed that higher is better, but this behaviour can be
+  # changed to lower is better, i.e. behaving as a loss score, by setting
+  # `best_model_eval_metric_higher_is_better = False`.
+  # If `best_model_eval_metric` is empty (the default), best checkpointing is
+  # disabled.
   config.best_model_eval_metric = ""
+  config.best_model_eval_metric_higher_is_better = True
 
   return config

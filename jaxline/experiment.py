@@ -17,10 +17,11 @@
 Any class that implements this interface is compatible with
 the JAXline Distributed Training system.
 """
+
 import abc
 import functools
 import time
-from typing import Any, Dict, List, Mapping, Optional, Text
+from typing import Dict, List, Mapping, Optional
 
 from absl import logging
 
@@ -57,8 +58,11 @@ class AbstractExperiment(abc.ABC):
     # TODO(mjoneill): Make init_rng non-optional after users have transitioned.
 
   @abc.abstractmethod
-  def step(self, *, global_step: jnp.ndarray, rng: jnp.ndarray,
-           writer: Optional[Any]) -> Dict[Text, np.ndarray]:
+  def step(self,
+           *,
+           global_step: jnp.ndarray,
+           rng: jnp.ndarray,
+           writer: Optional[utils.Writer]) -> Dict[str, np.ndarray]:
     """Performs a step of computation e.g. a training step.
 
     This function will be wrapped by `utils.kwargs_only` meaning that when
@@ -80,8 +84,13 @@ class AbstractExperiment(abc.ABC):
     """
 
   @abc.abstractmethod
-  def evaluate(self, *, global_step: jnp.ndarray, rng: jnp.ndarray,
-               writer: Optional[Any]) -> Optional[Dict[Text, np.ndarray]]:
+  def evaluate(
+      self,
+      *,
+      global_step: jnp.ndarray,
+      rng: jnp.ndarray,
+      writer: Optional[utils.Writer],
+  ) -> Optional[Dict[str, np.ndarray]]:
 
     """Performs the full evaluation of the model.
 
@@ -106,7 +115,7 @@ class AbstractExperiment(abc.ABC):
 
   def train_loop(self, config: config_dict.ConfigDict, state,
                  periodic_actions: List[utils.PeriodicAction],
-                 writer: Optional[Any] = None):
+                 writer: Optional[utils.Writer] = None):
     """Default training loop implementation.
 
     Can be overridden for advanced use cases that need a different training loop
@@ -151,7 +160,7 @@ class AbstractExperiment(abc.ABC):
         for action in periodic_actions:
           action(t, state.global_step, scalar_outputs)
 
-  def snapshot_state(self) -> Mapping[Text, jnp.array]:
+  def snapshot_state(self) -> Mapping[str, jnp.ndarray]:
     """Takes a frozen copy of the current experiment state for checkpointing.
 
     Returns:
@@ -172,7 +181,7 @@ class AbstractExperiment(abc.ABC):
       snapshot_state[chk_name] = getattr(self, attr_name)
     return snapshot_state
 
-  def restore_from_snapshot(self, snapshot_state: Mapping[Text, jnp.array]):
+  def restore_from_snapshot(self, snapshot_state: Mapping[str, jnp.ndarray]):
     """Restores experiment state from a snapshot.
 
     Args:

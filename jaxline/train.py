@@ -39,7 +39,6 @@ def _log_outputs(step, scalar_values):
 
 def _initialize_experiment(experiment_class, mode, rng, experiment_kwargs):
   """Initializes experiment catching old style init methods."""
-
   init_args = inspect.getfullargspec(experiment_class).args
   if "init_rng" in init_args:
     experiment = experiment_class(
@@ -62,7 +61,11 @@ def _initialize_experiment(experiment_class, mode, rng, experiment_kwargs):
 
 
 @utils.disable_pmap_jit
-def train(experiment_class, config, checkpointer, writer, periodic_actions=()):
+def train(experiment_class,
+          config,
+          checkpointer: utils.Checkpointer,
+          writer: utils.Writer,
+          periodic_actions=()):
   """Main training loop."""
   logging.info("Training with config:\n%s", config)
   is_chief = jax.host_id() == 0
@@ -127,7 +130,11 @@ def train(experiment_class, config, checkpointer, writer, periodic_actions=()):
 
 
 @utils.disable_pmap_jit
-def evaluate(experiment_class, config, checkpointer, writer, jaxline_mode=None):
+def evaluate(experiment_class,
+             config,
+             checkpointer: utils.Checkpointer,
+             writer: utils.Writer,
+             jaxline_mode=None):
   """Main evaluation loop."""
   if jaxline_mode is None:
     jaxline_mode = FLAGS.jaxline_mode
@@ -142,8 +149,22 @@ def evaluate(experiment_class, config, checkpointer, writer, jaxline_mode=None):
   if config.best_model_eval_metric and jax.host_id() == 0:
     # Initialize best state.
     best_state = checkpointer.get_experiment_state("best")
-    best_state.best_eval_metric_value = float("-inf")
+    if config.best_model_eval_metric_higher_is_better:
+      best_state.best_eval_metric_value = float("-inf")
+      eval_metric_is_better_op = jnp.greater
+      eval_metric_comparison_str = ">"
+    else:
+      best_state.best_eval_metric_value = float("inf")
+      eval_metric_is_better_op = jnp.less
+      eval_metric_comparison_str = "<"
     best_state.best_model_eval_metric = config.best_model_eval_metric
+
+    best_state.experiment_module = experiment
+
+    # Restore to preserve 'best_eval_metric_value' if evaluator was preempted.
+    if checkpointer.can_be_restored("best"):
+      with utils.log_activity("best checkpoint restore"):
+        checkpointer.restore("best")
 
   # Will evaluate the latest checkpoint in the directory.
   state = checkpointer.get_experiment_state("latest")
@@ -203,11 +224,11 @@ def evaluate(experiment_class, config, checkpointer, writer, jaxline_mode=None):
                          f"was not returned by the evaluate method")
       current_eval_metric_value = scalar_values[config.best_model_eval_metric]
       old_eval_metric_value = best_state.best_eval_metric_value
-      if old_eval_metric_value < current_eval_metric_value:
-        logging.info("%s: %s > %s, saving new best checkpoint.",
+      if eval_metric_is_better_op(current_eval_metric_value,
+                                  old_eval_metric_value):
+        logging.info("%s: %s %s %s, saving new best checkpoint.",
                      config.best_model_eval_metric, current_eval_metric_value,
-                     old_eval_metric_value)
-        best_state = checkpointer.get_experiment_state("best")
+                     eval_metric_comparison_str, old_eval_metric_value)
         best_state.global_step = state.global_step
         best_state.experiment_module = experiment
         best_state.best_eval_metric_value = current_eval_metric_value
