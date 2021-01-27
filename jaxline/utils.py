@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Utility functions for Jaxline experiments.
-"""
+"""Utility functions for Jaxline experiments."""
 
 import collections
 from concurrent import futures
@@ -26,7 +25,7 @@ import queue
 import sys
 import threading
 
-from typing import Callable, Dict, Iterable, Any, Generator, Text
+from typing import Any, Callable, Dict, Generator, Iterable, Mapping, TypeVar
 
 from absl import flags
 from absl import logging
@@ -35,27 +34,54 @@ import chex
 import jax
 import jax.numpy as jnp
 from ml_collections import config_dict
+from typing_extensions import Protocol
 import wrapt
 
 # TODO(mjoneill): Make flag more informative after copybara is set up
-flags.DEFINE_bool(
+_JAXLINE_POST_MORTEM = flags.DEFINE_bool(
     "jaxline_post_mortem", False,
     "Whether to enter into post-mortem after an exception. ")
 
-flags.DEFINE_bool(
+_JAXLINE_DISABLE_PMAP_JIT = flags.DEFINE_bool(
     "jaxline_disable_pmap_jit", False,
     "Whether to disable all pmaps and jits, making it easier to inspect and "
     "trace code in a debugger.")
 
-FLAGS = flags.FLAGS
-
 SnapshotNT = collections.namedtuple("SnapshotNT", ["id", "pickle_nest"])
 CheckpointNT = collections.namedtuple("CheckpointNT", ["active", "history"])
 
+T = TypeVar("T")
+
+
+class Writer(Protocol):
+  """Interface for writers/loggers."""
+
+  def write_scalars(self, global_step: int, scalars: Mapping[str, Any]):
+    """Writes a dictionary of scalars."""
+
+
+class Checkpointer(Protocol):
+  """An interface for checkpointer objects."""
+
+  def save(self, ckpt_series: str) -> None:
+    """Saves the checkpoint."""
+
+  def restore(self, ckpt_series: str) -> None:
+    """Restores the checkpoint."""
+
+  def get_experiment_state(self, ckpt_series: str):
+    """Returns the experiment state for a given checkpoint series."""
+
+  def restore_path(self, ckpt_series: str) -> str:
+    """Returns the restore path for the checkpoint."""
+
+  def can_be_restored(self, ckpt_series: str) -> bool:
+    """Returns whether or not a given checkpoint series can be restored."""
+
 
 def py_prefetch(
-    iterable_function: Callable[[], Iterable[Any]],
-    buffer_size: int = 5) -> Generator[Any, None, None]:
+    iterable_function: Callable[[], Iterable[T]],
+    buffer_size: int = 5) -> Generator[T, None, None]:
   """Performs prefetching of elements from an iterable in a separate thread.
 
   Args:
@@ -263,8 +289,8 @@ class PeriodicAction:
   """An action that executes periodically (e.g. logging)."""
 
   def __init__(self,
-               fn: Callable[[int, Dict[Text, float]], None],
-               interval_type: Text,
+               fn: Callable[[int, Dict[str, float]], None],
+               interval_type: str,
                interval: float,
                start_time: float = 0.0,
                start_step: int = 0,
@@ -325,7 +351,7 @@ class PeriodicAction:
     self._prev_time = t
     self._prev_step = step
 
-  def __call__(self, t: float, step: int, scalar_outputs: Dict[Text,
+  def __call__(self, t: float, step: int, scalar_outputs: Dict[str,
                                                                jnp.ndarray]):
     """Calls periodic action if interval since last call sufficiently large.
 
@@ -353,7 +379,7 @@ def debugger_fallback(f):
     # KeyboardInterrupt and SystemExit are not derived from BaseException,
     # hence not caught by the post-mortem.
     except Exception as e:  # pylint: disable=broad-except
-      if FLAGS.jaxline_post_mortem:
+      if _JAXLINE_POST_MORTEM.value:
         pdb.post_mortem(e.__traceback__)
       raise
   return inner_wrapper
@@ -421,7 +447,7 @@ class InMemoryCheckpointer:
       else:
         current_state[sk] = sv
 
-  def get_state(self, ckpt_series):
+  def get_experiment_state(self, ckpt_series):
     if ckpt_series not in GLOBAL_CHECKPOINT_DICT:
       active = threading.local()
       new_series = CheckpointNT(active, [])
@@ -434,7 +460,7 @@ class InMemoryCheckpointer:
   def save(self, ckpt_series):
     """Save the current state of ckpt_series to a snapshot."""
     series = GLOBAL_CHECKPOINT_DICT[ckpt_series]
-    active_state = self.get_state(ckpt_series)
+    active_state = self.get_experiment_state(ckpt_series)
     id_ = 0 if not series.history else series.history[-1].id + 1
     snapshot = copy.copy(active_state)
     series.history.append(SnapshotNT(id_, snapshot))
@@ -449,7 +475,7 @@ class InMemoryCheckpointer:
 
   def restore(self, ckpt_series):
     snapshot = GLOBAL_CHECKPOINT_DICT[ckpt_series].history[-1].pickle_nest
-    current_state = self.get_state(ckpt_series)
+    current_state = self.get_experiment_state(ckpt_series)
     self._override_or_insert(current_state, snapshot)
     logging.info("Returned checkpoint %s with id %s.", ckpt_series,
                  GLOBAL_CHECKPOINT_DICT[ckpt_series].history[-1].id)
@@ -473,7 +499,7 @@ def disable_pmap_jit(fn: Callable[..., Any]) -> Callable[..., Any]:
   """
   @functools.wraps(fn)
   def inner_wrapper(*args, **kwargs):
-    if FLAGS.jaxline_disable_pmap_jit:
+    if _JAXLINE_DISABLE_PMAP_JIT.value:
       with chex.fake_pmap_and_jit():
         return fn(*args, **kwargs)
     else:

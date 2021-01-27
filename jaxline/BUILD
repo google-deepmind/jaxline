@@ -29,8 +29,13 @@ py_library(
         # absl/flags
         # absl/logging
         # chex
+        # concurrent:futures
+        # enum
+        # future
         # jax
         # ml_collections/config_dict
+        # typing
+        # typing_extensions
         # wrapt
     ],
 )
@@ -43,6 +48,7 @@ py_test(
         ":base_config",
         ":experiment",
         ":train",
+        # proto2_pure_python  # Automatically added go/proto_python_default
         # absl/testing:absltest
         # ml_collections/config_dict
     ],
@@ -99,6 +105,7 @@ py_strict_hermetic_test(
     srcs_version = "PY3",
     deps = [
         ":utils",
+        # proto2_pure_python  # Automatically added go/proto_python_default
         # absl/testing:absltest
         # absl/testing:flagsaver
         # jax
