@@ -8,7 +8,7 @@ experiment boilerplate. This ensures that it can serve as an effective starting
 point for a wide variety of use cases.
 
 Many users will only need to fork the
-[`experiment.py`](https://github.com/deepmind/jaxline/tree/master/experiment.py)
+[`experiment.py`](https://github.com/deepmind/jaxline/tree/master/jaxline/experiment.py)
 file and rely on JAXline for everything else. Other users with more custom
 requirements will want to (and are encouraged to) fork other components of
 JAXline too, depending on their particular use case.
@@ -50,19 +50,19 @@ $ pip install git+https://github.com/deepmind/jaxline
 
 1.  Create an `experiment.py` file and inside it define an `Experiment` class
     that inherits from
-    [`experiment.AbstractExperiment`](https://github.com/deepmind/jaxline/tree/master/experiment.py).
+    [`experiment.AbstractExperiment`](https://github.com/deepmind/jaxline/tree/master/jaxline/experiment.py).
 2.  Implement the methods required by
     `AbstractExperiment` in your own `Experiment` class (i.e. the
     `abstractmethod`s). Optionally override the default implementations of `AbstractExperiment`'s other methods.
 3.  Define a `config`, either in `experiment.py` or elsewhere, defining any
     settings that you do not wish to inherit from
-    [`base_config`](https://github.com/deepmind/jaxline/tree/master/base_config.py).
+    [`base_config`](https://github.com/deepmind/jaxline/tree/master/jaxline/base_config.py).
     At the very least this will include `config.experiment_kwargs` to define the
     config required by your `Experiment`. Make sure this `config` object is
     included in the `flags` accessible to `experiment.py`.
 4.  Add the following lines to the bottom of your `experiment.py` to ensure that
     your `Experiment` object is correctly passed through to
-    [`platform.py`](https://github.com/deepmind/jaxline/tree/master/platform.py):
+    [`platform.py`](https://github.com/deepmind/jaxline/tree/master/jaxline/platform.py):
 
     ```
     if __name__ == '__main__':
@@ -76,14 +76,14 @@ $ pip install git+https://github.com/deepmind/jaxline
 
 So far this version of JAXline only supports in-memory checkpointing, as handled
 by our
-[`InMemoryCheckpointer`](https://github.com/deepmind/jaxline/tree/master/utils.py)
+[`InMemoryCheckpointer`](https://github.com/deepmind/jaxline/tree/master/jaxline/utils.py)
 It allows you to save in memory multiple separate checkpoint series in your
 train and eval jobs (see below).
 
 The user is expected to override the
-[`CHECKPOINT_ATTRS`](https://github.com/deepmind/jaxline/tree/master/experiment.py)
+[`CHECKPOINT_ATTRS`](https://github.com/deepmind/jaxline/tree/master/jaxline/experiment.py)
 and
-[`NON_BROADCAST_CHECKPOINT_ATTRS`](https://github.com/deepmind/jaxline/tree/master/experiment.py)
+[`NON_BROADCAST_CHECKPOINT_ATTRS`](https://github.com/deepmind/jaxline/tree/master/jaxline/experiment.py)
 dicts (at least one of these) in order to map checkpointable attributes of their
 own `Experiment` class to names they wish them to be stored under in the
 checkpoint.
@@ -95,14 +95,14 @@ jaxline should checkpoint whole.
 You can specify the frequency with which to save checkpoints, as well as whether
 to checkpoint based on step or seconds, by setting the
 `save_checkpoint_interval` and `interval_type`  config flags
-[here](https://github.com/deepmind/jaxline/tree/master/base_config.py).
+[here](https://github.com/deepmind/jaxline/tree/master/jaxline/base_config.py).
 
 `config.max_checkpoints_to_keep` can be used to specify the maximum number of
 checkpoints to keep. By default this is set to 5.
 
 By setting `config.best_model_eval_metric`, you can specify which value in the
 `scalars` dictionary returned by your
-[`evaluate`](https://github.com/deepmind/jaxline/tree/master/experiment.py)
+[`evaluate`](https://github.com/deepmind/jaxline/tree/master/jaxline/experiment.py)
 function to use as a 'fitness score'. JAXline will then save a separate series
 of checkpoints corresponding to steps at which the fitness score is higher than
 previously seen.
@@ -110,14 +110,14 @@ previously seen.
 ## Logging
 
 So far this version of JAXline only supports logging to Tensorboard via our
-[`TensorBoardLogger`](https://github.com/deepmind/jaxline/tree/master/platform.py)
+[`TensorBoardLogger`](https://github.com/deepmind/jaxline/tree/master/jaxline/platform.py)
 
 The user is expected to return a dictionary of scalars from their
-[`step`](https://github.com/deepmind/jaxline/tree/master/experiment.py)
+[`step`](https://github.com/deepmind/jaxline/tree/master/jaxline/experiment.py)
 and
-[`evaluate`](https://github.com/deepmind/jaxline/tree/master/experiment.py)
+[`evaluate`](https://github.com/deepmind/jaxline/tree/master/jaxline/experiment.py)
 methods, and
-[`TensorBoardLogger.write_scalars`](https://github.com/deepmind/jaxline/tree/master/platform.py)
+[`TensorBoardLogger.write_scalars`](https://github.com/deepmind/jaxline/tree/master/jaxline/platform.py)
 will periodically write these scalars to `TensorBoard`.
 
 All logging will happen asynchronously to the main thread so as not to interrupt
@@ -125,21 +125,21 @@ the training loop.
 
 You can specify the frequency with which to log, as well as whether to log by
 step or by seconds, by setting the `log_train_data_interval` and `interval_type`
-config flags [here](https://github.com/deepmind/jaxline/tree/master/base_config.py).
+config flags [here](https://github.com/deepmind/jaxline/tree/master/jaxline/base_config.py).
 If `config.log_all_train_data` is set to `True` (`False` by default) JAXline
 will cache the scalars from intermediate steps and log them all at once at the
 end of the period.
 
 JAXline passes the
-[`TensorBoardLogger`](https://github.com/deepmind/jaxline/tree/master/platform.py)
+[`TensorBoardLogger`](https://github.com/deepmind/jaxline/tree/master/jaxline/platform.py)
 instance through to the
-[`step`](https://github.com/deepmind/jaxline/tree/master/experiment.py)
+[`step`](https://github.com/deepmind/jaxline/tree/master/jaxline/experiment.py)
 and
-[`evaluate`](https://github.com/deepmind/jaxline/tree/master/experiment.py)
+[`evaluate`](https://github.com/deepmind/jaxline/tree/master/jaxline/experiment.py)
 methods to allow the user to perform additional logging inside their
 `Experiment` class if they so wish. A particular use case for this is if you
 want to write images, which can be achieved via
-[`ExperimentWriter.write_images`](https://github.com/deepmind/jaxline/tree/master/platform.py).
+[`ExperimentWriter.write_images`](https://github.com/deepmind/jaxline/tree/master/jaxline/platform.py).
 
 
 ## Launching
