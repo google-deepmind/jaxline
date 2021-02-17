@@ -104,8 +104,9 @@ By setting `config.best_model_eval_metric`, you can specify which value in the
 `scalars` dictionary returned by your
 [`evaluate`](https://github.com/deepmind/jaxline/tree/master/jaxlineexperiment.py)
 function to use as a 'fitness score'. JAXline will then save a separate series
-of checkpoints corresponding to steps at which the fitness score is higher than
-previously seen.
+of checkpoints corresponding to steps at which the fitness score is better than
+previously seen. Depending on whether you are maximizing or minimizing the eval
+metric, set `config.best_model_eval_metric_higher_is_better` to True or False.
 
 ## Logging
 
