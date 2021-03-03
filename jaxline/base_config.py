@@ -50,7 +50,6 @@ def get_base_config():
   config.experiment_kwargs = config_dict.ConfigDict()
 
   config.training_steps = 10000  # Number of training steps.
-  config.training_steps_per_run = 1
 
   config.interval_type = "secs"
   config.save_checkpoint_interval = 300
