@@ -229,11 +229,13 @@ class TestSpecializeRngHostDevice(absltest.TestCase):
   def test_unique_device(self):
     """Tests that rngs are unique across devices."""
 
+    mode = "unique_host_unique_device"
+    host_id_devices = utils.host_id_devices_for_rng(mode)
     specialize_func = jax.pmap(functools.partial(
         utils.specialize_rng_host_device, axis_name="i",
-        mode="unique_host_unique_device"), axis_name="i")
+        mode=mode), axis_name="i")
 
-    rng = specialize_func(self.rng)
+    rng = specialize_func(self.rng, host_id_devices)
 
     self.assertEqual(
         np.unique(rng, axis=0).shape[0], jax.local_device_count())
@@ -241,10 +243,12 @@ class TestSpecializeRngHostDevice(absltest.TestCase):
   def test_same_device(self):
     """Tests rngs are same across devices."""
 
+    mode = "unique_host_same_device"
+    host_id_devices = utils.host_id_devices_for_rng(mode)
     specialize_func = jax.pmap(functools.partial(
         utils.specialize_rng_host_device, axis_name="i",
-        mode="unique_host_same_device"), axis_name="i")
-    rng = specialize_func(self.rng)
+        mode=mode), axis_name="i")
+    rng = specialize_func(self.rng, host_id_devices)
 
     self.assertEqual(
         np.unique(rng, axis=0).shape[0], 1)
@@ -252,16 +256,19 @@ class TestSpecializeRngHostDevice(absltest.TestCase):
   def test_unique_host(self):
     """Tests rngs unique between hosts."""
 
+    mode = "unique_host_same_device"
     with mock.patch.object(utils.jax, "host_id", return_value=0):
+      host_id_devices = utils.host_id_devices_for_rng(mode)
       specialize_func = jax.pmap(functools.partial(
           utils.specialize_rng_host_device, axis_name="i",
-          mode="unique_host_same_device"), axis_name="i")
-      rng0 = specialize_func(self.rng)
+          mode=mode), axis_name="i")
+      rng0 = specialize_func(self.rng, host_id_devices)
     with mock.patch.object(utils.jax, "host_id", return_value=1):
+      host_id_devices = utils.host_id_devices_for_rng(mode)
       specialize_func = jax.pmap(functools.partial(
           utils.specialize_rng_host_device, axis_name="i",
-          mode="unique_host_same_device"), axis_name="i")
-      rng1 = specialize_func(self.rng)
+          mode=mode), axis_name="i")
+      rng1 = specialize_func(self.rng, host_id_devices)
 
     self.assertEqual(
         np.unique(np.concatenate([rng0, rng1], axis=0), axis=0).shape[0], 2)

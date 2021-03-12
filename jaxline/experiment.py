@@ -131,16 +131,21 @@ class AbstractExperiment(abc.ABC):
     """
 
     @functools.partial(jax.pmap, axis_name="i")
-    def next_device_state(global_step, rng: jnp.ndarray):
+    def next_device_state(
+        global_step: jnp.ndarray,
+        rng: jnp.ndarray,
+        host_id: Optional[jnp.ndarray],
+    ):
       """Updates device global step and rng in one pmap fn to reduce overhead."""
       global_step += 1
       step_rng, state_rng = tuple(jax.random.split(rng))
       step_rng = utils.specialize_rng_host_device(
-          step_rng, axis_name="i", mode=config.random_mode_train)
+          step_rng, host_id, axis_name="i", mode=config.random_mode_train)
       return global_step, (step_rng, state_rng)
 
     global_step_devices = np.broadcast_to(state.global_step,
                                           [jax.local_device_count()])
+    host_id_devices = utils.host_id_devices_for_rng(config.random_mode_train)
     step_key = state.train_step_rng
 
     with utils.log_activity("training loop"):
@@ -155,7 +160,9 @@ class AbstractExperiment(abc.ABC):
           # to next_device_state below.
           state.global_step += 1
           global_step_devices, (step_key, state.train_step_rng) = (
-              next_device_state(global_step_devices, state.train_step_rng))
+              next_device_state(global_step_devices,
+                                state.train_step_rng,
+                                host_id_devices))
 
         for action in periodic_actions:
           action(t, state.global_step, scalar_outputs)

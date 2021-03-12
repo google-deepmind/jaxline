@@ -249,15 +249,33 @@ class DistributedRNGMode(enum.Enum):
   SAME_HOST_UNIQUE_DEVICE = "same_host_unique_device"
   SAME_HOST_SAME_DEVICE = "same_host_same_device"
 
+  @property
+  def unique_host(self):
+    return self in {DistributedRNGMode.UNIQUE_HOST_UNIQUE_DEVICE,
+                    DistributedRNGMode.UNIQUE_HOST_SAME_DEVICE}
+
+  @property
+  def unique_device(self):
+    return self in {DistributedRNGMode.UNIQUE_HOST_UNIQUE_DEVICE,
+                    DistributedRNGMode.SAME_HOST_UNIQUE_DEVICE}
+
+
+def host_id_devices_for_rng(mode="unique_host_unique_device"):
+  if not DistributedRNGMode(mode).unique_host:
+    return None
+  return jnp.broadcast_to(jax.host_id(), (jax.local_device_count(),))
+
 
 def specialize_rng_host_device(
-    rng, axis_name, mode="unique_host_unique_device"):
+    rng, host_id, axis_name, mode="unique_host_unique_device"):
   """Specializes a rng to the host/device we are on.
 
   Must be called from within a pmapped function.
 
   Args:
     rng: a jax.random.PRNGKey.
+    host_id: the host ID to fold in, or None. Must be specified (not None) for
+      the "unique_host_*" modes.
     axis_name: the axis of the devices we are specializing across.
     mode: str mode. Must be one of "unique_host_unique_device",
       "unique_host_same_device", "same_host_unique_device",
@@ -267,11 +285,15 @@ def specialize_rng_host_device(
   """
   # Will throw an error if mode is not a valid enumeration.
   enum_mode = DistributedRNGMode(mode)
-  if enum_mode in [DistributedRNGMode.UNIQUE_HOST_UNIQUE_DEVICE,
-                   DistributedRNGMode.UNIQUE_HOST_SAME_DEVICE]:
-    rng = jax.random.fold_in(rng, jax.host_id())
-  if enum_mode in [DistributedRNGMode.UNIQUE_HOST_UNIQUE_DEVICE,
-                   DistributedRNGMode.SAME_HOST_UNIQUE_DEVICE]:
+  if enum_mode.unique_host:
+    # Note that we intentionally do NOT call `jax.host_id()` here, taking it as
+    # an input instead. This is because we don't want to (effectively) use a
+    # hard-coded Python int inside a potentially `pmap`ped context as that
+    # results in different executable fingerprints across hosts.
+    if host_id is None:
+      raise ValueError(f"host_id must be given in RNG mode: {enum_mode}")
+    rng = jax.random.fold_in(rng, host_id)
+  if enum_mode.unique_device:
     rng = jax.random.fold_in(rng, jax.lax.axis_index(axis_name))
   return rng
 

@@ -174,9 +174,10 @@ def evaluate(experiment_class,
 
   eval_rng = jnp.broadcast_to(
       eval_rng, (jax.local_device_count(),) + eval_rng.shape)
+  host_id_devices = utils.host_id_devices_for_rng(config.random_mode_eval)
   eval_rng = jax.pmap(functools.partial(
       utils.specialize_rng_host_device, axis_name="i",
-      mode=config.random_mode_eval), axis_name="i")(eval_rng)
+      mode=config.random_mode_eval), axis_name="i")(eval_rng, host_id_devices)
 
   if config.one_off_evaluate:
     checkpointer.restore("latest")
