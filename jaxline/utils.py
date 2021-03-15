@@ -321,7 +321,8 @@ class PeriodicAction:
     """Initializes attributes for periodic action.
 
     Args:
-      fn: Function representing the action to be run periodically.
+      fn: Function representing the action to be run periodically. Takes global
+        step and scalars returned by `Experiment.step` as arguments.
       interval_type: "secs" or "steps".
       interval: Interval between function calls.
       start_time: The start epoch time as a float to calculate time intervals
