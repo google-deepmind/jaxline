@@ -195,6 +195,15 @@ class AbstractExperiment(abc.ABC):
       snapshot_state: A mapping from experiment attributes to names they are
         stored under in the snapshot.
     """
+    # Explicitly clear existing attributes first to ensure TPU memory doesn't
+    # get fragmented.
+    def _clear_attributes(attributes):
+      for attr_name, _ in attributes.items():
+        if hasattr(self, attr_name):
+          delattr(self, attr_name)
+    _clear_attributes(self.CHECKPOINT_ATTRS)
+    _clear_attributes(self.NON_BROADCAST_CHECKPOINT_ATTRS)
+
     for attr_name, chk_name in self.CHECKPOINT_ATTRS.items():
       value = utils.bcast_local_devices(snapshot_state[chk_name])
       setattr(self, attr_name, value)
