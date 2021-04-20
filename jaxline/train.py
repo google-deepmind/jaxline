@@ -78,8 +78,7 @@ def train(experiment_class,
   state = checkpointer.get_experiment_state("latest")
   state.global_step = 0
   state.experiment_module = experiment
-  state.train_step_rng = jnp.broadcast_to(
-      rng, (jax.local_device_count(),) + rng.shape)
+  state.train_step_rng = utils.bcast_local_devices(rng)
 
   if checkpointer.can_be_restored("latest"):
     with utils.log_activity("checkpoint restore"):
