@@ -150,7 +150,8 @@ class AbstractExperiment(abc.ABC):
 
     with utils.log_activity("training loop"):
       while state.global_step < config.training_steps:
-        with jax.profiler.StepTraceContext("train", step_num=state.global_step):
+        with jax.profiler.StepTraceAnnotation(
+            "train", step_num=state.global_step):
           scalar_outputs = self.step(
               global_step=global_step_devices, rng=step_key, writer=writer)
 
