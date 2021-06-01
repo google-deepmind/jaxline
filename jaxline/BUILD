@@ -13,7 +13,8 @@ package_group(
     name = "friends",
     includes = ["//learning/deepmind:visibility"],
     packages = [
-        "//medical/imaging/...",
+        # dm_friend
+        # dm_research
     ],
 )
 
