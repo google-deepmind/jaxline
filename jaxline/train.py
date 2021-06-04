@@ -221,7 +221,8 @@ def evaluate(experiment_class,
       if config.best_model_eval_metric not in scalar_values:
         raise ValueError(f"config.best_model_eval_metric has been specified "
                          f"as {config.best_model_eval_metric}, but this key "
-                         f"was not returned by the evaluate method")
+                         f"was not returned by the evaluate method. Got: "
+                         f"{scalar_values.keys()}")
       current_eval_metric_value = scalar_values[config.best_model_eval_metric]
       old_eval_metric_value = best_state.best_eval_metric_value
       if eval_metric_is_better_op(current_eval_metric_value,
