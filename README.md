@@ -247,6 +247,11 @@ By setting the flag `--jaxline_disable_pmap_jit` on the command-line, all pmaps
 and jits will be disabled, making it easier to inspect and trace code in a
 debugger.
 
+## Citing Jaxline
+
+Please use [this reference](https://github.com/deepmind/jax/blob/main/deepmind2020jax.txt).
+
+
 ## Contributing
 
 Thank you for your interest in JAXline. The primary goal of open-sourcing
