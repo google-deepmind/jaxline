@@ -51,7 +51,10 @@ _JAXLINE_ENSURE_TPU = flags.DEFINE_bool(
     "jaxline_ensure_tpu", False, "Whether to ensure we have a TPU connected.")
 
 
-def create_checkpointer(config: config_dict.ConfigDict, mode: str) -> Any:
+def create_checkpointer(
+    config: config_dict.ConfigDict,
+    mode: str,
+) -> utils.Checkpointer:
   """Creates an object to be used as a checkpointer."""
   return utils.InMemoryCheckpointer(config, mode)
 
@@ -90,7 +93,7 @@ def create_writer(config: config_dict.ConfigDict, mode: str) -> Any:
 
 
 @utils.debugger_fallback
-def main(experiment_class, argv):
+def main(experiment_class, argv, checkpointer_factory=create_checkpointer):
   """Main potentially under a debugger."""
   del argv  # Unused.
   # Because we renamed "mode" to "jaxline_mode on March 5, 2020, we add this
@@ -121,12 +124,12 @@ def main(experiment_class, argv):
   jaxline_mode = _JAXLINE_MODE.value
   if jaxline_mode == "train":
     # Run training.
-    checkpointer = create_checkpointer(config, jaxline_mode)
+    checkpointer = checkpointer_factory(config, jaxline_mode)
     writer = create_writer(config, jaxline_mode)
     train.train(experiment_class, config, checkpointer, writer)
   elif jaxline_mode.startswith("eval"):
     # Run evaluation.
-    checkpointer = create_checkpointer(config, jaxline_mode)
+    checkpointer = checkpointer_factory(config, jaxline_mode)
     writer = create_writer(config, jaxline_mode)
     train.evaluate(experiment_class, config, checkpointer, writer,
                    jaxline_mode)
@@ -135,12 +138,12 @@ def main(experiment_class, argv):
 
     # Run training in a background thread!
     pool.submit(train.train, experiment_class, config,
-                create_checkpointer(config, "train"),
+                checkpointer_factory(config, "train"),
                 create_writer(config, "train"))
 
     # Run eval!
     train.evaluate(experiment_class, config,
-                   create_checkpointer(config, "eval"),
+                   checkpointer_factory(config, "eval"),
                    create_writer(config, "eval"))
 
     # If we're here, eval has finished. Wait for train to finish!
