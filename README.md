@@ -8,7 +8,7 @@ experiment boilerplate. This ensures that it can serve as an effective starting
 point for a wide variety of use cases.
 
 Many users will only need to fork the
-[`experiment.py`](https://github.com/deepmind/jaxline/tree/master/jaxlineexperiment.py)
+[`experiment.py`](https://github.com/deepmind/jaxline/blob/master/jaxline/experiment.py)
 file and rely on JAXline for everything else. Other users with more custom
 requirements will want to (and are encouraged to) fork other components of
 JAXline too, depending on their particular use case.
