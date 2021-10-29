@@ -87,7 +87,7 @@ def train(experiment_class,
   periodic_actions += (
       utils.PeriodicAction(
           _log_outputs,
-          interval_type=config.interval_type,
+          interval_type=config.logging_interval_type or config.interval_type,
           interval=config.log_tensors_interval),
       )
 
@@ -96,7 +96,8 @@ def train(experiment_class,
       periodic_actions += (
           utils.PeriodicAction(
               lambda *_: checkpointer.save("latest"),
-              interval_type=config.interval_type,
+              interval_type=(config.checkpoint_interval_type
+                             or config.interval_type),
               interval=config.save_checkpoint_interval,
               run_async=False),)  # run_async True would not be thread-safe.
 
@@ -108,7 +109,8 @@ def train(experiment_class,
       periodic_actions += (
           utils.PeriodicAction(
               write_scalars,
-              interval_type=config.interval_type,
+              interval_type=(config.logging_interval_type
+                             or config.interval_type),
               interval=config.log_train_data_interval,
               log_all_data=config.log_all_train_data),)
 
@@ -120,6 +122,10 @@ def train(experiment_class,
   if is_chief:
     with utils.log_activity("final checkpoint"):
       checkpointer.save("latest")
+
+  # Join all async periodic actions that are unfinished.
+  for pa in periodic_actions:
+    pa.wait_to_finish()
 
   # We occasionally see errors when the final checkpoint is being written if
   # the other hosts exit. Here we force all hosts to participate in one final
@@ -236,7 +242,7 @@ def evaluate(experiment_class,
         best_state.train_step_rng = state.train_step_rng
         checkpointer.save("best")
 
-    if state.global_step >= config.training_steps:
+    if not experiment.should_run_step(state.global_step, config):
       logging.info("Last checkpoint (iteration %d) evaluated, exiting.",
                    state.global_step)
       break

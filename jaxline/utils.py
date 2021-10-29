@@ -25,7 +25,7 @@ import queue
 import sys
 import threading
 
-from typing import Any, Callable, Dict, Generator, Iterable, Mapping, TypeVar
+from typing import Any, Callable, Dict, Generator, Iterable, Mapping, Optional, TypeVar
 
 from absl import flags
 from absl import logging
@@ -46,6 +46,13 @@ _JAXLINE_DISABLE_PMAP_JIT = flags.DEFINE_bool(
     "jaxline_disable_pmap_jit", False,
     "Whether to disable all pmaps and jits, making it easier to inspect and "
     "trace code in a debugger.")
+
+
+def _get_function_name(function) -> str:
+  if isinstance(function, functools.partial):
+    return f"partial({function.func.__name__})"
+  return function.__name__
+
 
 SnapshotNT = collections.namedtuple("SnapshotNT", ["id", "pickle_nest"])
 CheckpointNT = collections.namedtuple("CheckpointNT", ["active", "history"])
@@ -72,11 +79,14 @@ class Checkpointer(Protocol):
   def get_experiment_state(self, ckpt_series: str):
     """Returns the experiment state for a given checkpoint series."""
 
-  def restore_path(self, ckpt_series: str) -> str:
-    """Returns the restore path for the checkpoint."""
+  def restore_path(self, ckpt_series: str) -> Optional[str]:
+    """Returns the restore path for the checkpoint, or None."""
 
   def can_be_restored(self, ckpt_series: str) -> bool:
     """Returns whether or not a given checkpoint series can be restored."""
+
+  def wait_for_checkpointing_to_finish(self) -> None:
+    """Waits for any async checkpointing to complete."""
 
 
 def py_prefetch(
@@ -116,7 +126,7 @@ def py_prefetch(
         buffer.put(item)
     except Exception as e:  # pylint: disable=broad-except
       logging.exception("Error in producer thread for %s",
-                        iterable_function.__name__)
+                        _get_function_name(iterable_function))
       producer_error.append(e)
     finally:
       buffer.put(end)
@@ -137,6 +147,55 @@ def py_prefetch(
 tree_psum = jax.lax.psum
 
 
+def double_buffer_on_gpu(ds):
+  if jax.default_backend() == "gpu":
+    # This keeps two batches per-device in memory at all times, allowing
+    # h2d transfers to overlap with execution (see b/173483287 for details).
+    return double_buffer(ds)
+  else:
+    return ds
+
+
+def _device_put_sharded(sharded_tree, devices):
+  leaves, treedef = jax.tree_flatten(sharded_tree)
+  n = leaves[0].shape[0]
+  return jax.device_put_sharded(
+      [jax.tree_unflatten(treedef, [l[i] for l in leaves]) for i in range(n)],
+      devices)
+
+
+def double_buffer(ds: Iterable[T]) -> Generator[T, None, None]:
+  """Keeps at least two batches on the accelerator.
+
+  The current GPU allocator design reuses previous allocations. For a training
+  loop this means batches will (typically) occupy the same region of memory as
+  the previous batch. An issue with this is that it means we cannot overlap a
+  host->device copy for the next batch until the previous step has finished and
+  the previous batch has been freed.
+
+  By double buffering we ensure that there are always two batches on the device.
+  This means that a given batch waits on the N-2'th step to finish and free,
+  meaning that it can allocate and copy the next batch to the accelerator in
+  parallel with the N-1'th step being executed.
+
+  Args:
+    ds: Iterable of batches of numpy arrays.
+
+  Yields:
+    Batches of sharded device arrays.
+  """
+  batch = None
+  devices = jax.local_devices()
+  for next_batch in ds:
+    assert next_batch is not None
+    next_batch = _device_put_sharded(next_batch, devices)
+    if batch is not None:
+      yield batch
+    batch = next_batch
+  if batch is not None:
+    yield batch
+
+
 def get_first(xs):
   """Gets values from the first device."""
   return jax.tree_map(lambda x: x[0], xs)
@@ -146,7 +205,7 @@ def bcast_local_devices(value):
   """Broadcasts an object to all local devices."""
   devices = jax.local_devices()
   return jax.tree_map(
-      lambda v: jax.api.device_put_sharded(len(devices) * [v], devices), value)
+      lambda v: jax.device_put_sharded(len(devices) * [v], devices), value)
 
 
 def make_async(thread_name_prefix=""):
@@ -340,6 +399,7 @@ class PeriodicAction:
     self._interval = interval
     self._prev_time = start_time
     self._prev_step = start_step
+    self._apply_fn_future = None
     if run_async:
       self._apply_fn = make_async(self._fn.__name__)(self._apply_fn)  # pylint: disable=no-value-for-parameter
     self.log_all_data = log_all_data
@@ -374,6 +434,12 @@ class PeriodicAction:
     self._prev_time = t
     self._prev_step = step
 
+  def wait_to_finish(self):
+    """Waits for any periodic actions running in own threads to complete."""
+    if not (self._apply_fn_future is None or self._apply_fn_future.done()):
+      logging.info("Waiting for a periodic action to finish...")
+      self._apply_fn_future.result()
+
   def __call__(self, t: float, step: int, scalar_outputs: Dict[str,
                                                                jnp.ndarray]):
     """Calls periodic action if interval since last call sufficiently large.
@@ -385,7 +451,8 @@ class PeriodicAction:
     """
     if self._apply_condition(t, step):
       steps_per_sec = (step - self._prev_step) / (t - self._prev_time)
-      self._apply_fn(step, steps_per_sec, scalar_outputs)
+      self._apply_fn_future = self._apply_fn(step, steps_per_sec,
+                                             scalar_outputs)
       self.update_time(t, step)
     elif self.log_all_data:
       # Log data for dumping at next interval.
@@ -471,6 +538,7 @@ class InMemoryCheckpointer:
         current_state[sk] = sv
 
   def get_experiment_state(self, ckpt_series):
+    """Returns the experiment state for a given checkpoint series."""
     if ckpt_series not in GLOBAL_CHECKPOINT_DICT:
       active = threading.local()
       new_series = CheckpointNT(active, [])
@@ -480,8 +548,8 @@ class InMemoryCheckpointer:
           config_dict.ConfigDict())
     return GLOBAL_CHECKPOINT_DICT[ckpt_series].active.state
 
-  def save(self, ckpt_series):
-    """Save the current state of ckpt_series to a snapshot."""
+  def save(self, ckpt_series) -> None:
+    """Saves the checkpoint."""
     series = GLOBAL_CHECKPOINT_DICT[ckpt_series]
     active_state = self.get_experiment_state(ckpt_series)
     id_ = 0 if not series.history else series.history[-1].id + 1
@@ -492,21 +560,27 @@ class InMemoryCheckpointer:
           history=series.history[-self._max_checkpoints_to_keep:])
     logging.info("Saved checkpoint %s with id %s.", ckpt_series, id_)
 
-  def can_be_restored(self, ckpt_series):
+  def can_be_restored(self, ckpt_series) -> bool:
+    """Returns whether or not a given checkpoint series can be restored."""
     return ((ckpt_series in GLOBAL_CHECKPOINT_DICT) and
             GLOBAL_CHECKPOINT_DICT[ckpt_series].history)
 
-  def restore(self, ckpt_series):
+  def restore(self, ckpt_series) -> None:
+    """Restores the checkpoint."""
     snapshot = GLOBAL_CHECKPOINT_DICT[ckpt_series].history[-1].pickle_nest
     current_state = self.get_experiment_state(ckpt_series)
     self._override_or_insert(current_state, snapshot)
     logging.info("Returned checkpoint %s with id %s.", ckpt_series,
                  GLOBAL_CHECKPOINT_DICT[ckpt_series].history[-1].id)
 
-  def restore_path(self, ckpt_series):
+  def restore_path(self, ckpt_series) -> Optional[str]:
+    """Returns the restore path for the checkpoint, or None."""
     if not self.can_be_restored(ckpt_series):
       return None
     return GLOBAL_CHECKPOINT_DICT[ckpt_series].history[-1].id
+
+  def wait_for_checkpointing_to_finish(self) -> None:
+    """Waits for any async checkpointing to complete."""
 
 
 def disable_pmap_jit(fn: Callable[..., Any]) -> Callable[..., Any]:

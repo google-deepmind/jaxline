@@ -15,6 +15,7 @@
 """Tests for jaxline's utils."""
 
 import functools
+import itertools as it
 import time
 from unittest import mock
 
@@ -298,6 +299,28 @@ class TestJaxlineDisablePmapJit(absltest.TestCase):
         utils.disable_pmap_jit(lambda: None)()
         mock_fake_pmap_and_jit.assert_called_once()
 
+
+class DoubleBufferTest(absltest.TestCase):
+
+  def test_double_buffer(self):
+    if jax.default_backend() != "gpu":
+      self.skipTest("Only necessary on GPU.")
+
+    n = jax.local_device_count()
+    dataset = it.repeat(np.ones([n]))
+    iterator = iter(utils.double_buffer(dataset))
+
+    batch_ptrs = []
+    while len(batch_ptrs) < 4:
+      batch = next(iterator)
+      ptrs = [b.unsafe_buffer_pointer() for b in batch.device_buffers]
+      batch_ptrs.append(ptrs)
+      del batch
+
+    self.assertEqual(batch_ptrs[0], batch_ptrs[2])
+    self.assertEqual(batch_ptrs[1], batch_ptrs[3])
+    self.assertNotEqual(batch_ptrs[0], batch_ptrs[1])
+    self.assertNotEqual(batch_ptrs[2], batch_ptrs[3])
 
 if __name__ == "__main__":
   absltest.main()

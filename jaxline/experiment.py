@@ -71,7 +71,9 @@ class AbstractExperiment(abc.ABC):
 
     Args:
       global_step: A `ShardedDeviceArray` of the global step, one copy
-        for each local device.
+        for each local device. The values are guaranteed to be the same across
+        all local devices, it is just passed this way for consistency with
+        `rng`.
       rng: A `ShardedDeviceArray` of `PRNGKey`s, one for each local device,
         and unique to the global_step. The relationship between the keys is set
         by config.random_mode_train.
@@ -113,6 +115,11 @@ class AbstractExperiment(abc.ABC):
       A dictionary of scalar `np.array`s to be logged.
     """
 
+  def should_run_step(self, global_step: int,
+                      config: config_dict.ConfigDict) -> bool:
+    """Returns whether the step function will be run given the global_step."""
+    return global_step < config.training_steps
+
   def train_loop(self, config: config_dict.ConfigDict, state,
                  periodic_actions: List[utils.PeriodicAction],
                  writer: Optional[utils.Writer] = None):
@@ -149,7 +156,7 @@ class AbstractExperiment(abc.ABC):
     step_key = state.train_step_rng
 
     with utils.log_activity("training loop"):
-      while state.global_step < config.training_steps:
+      while self.should_run_step(state.global_step, config):
         with jax.profiler.StepTraceAnnotation(
             "train", step_num=state.global_step):
           scalar_outputs = self.step(
