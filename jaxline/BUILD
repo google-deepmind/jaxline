@@ -1,4 +1,4 @@
-load("//production/dependency/rpc/testing/hermetic:build_defs.bzl", "py_strict_hermetic_test")
+load("//learning/deepmind/jax:build_defs.bzl", "jax_py_test")
 
 # Description: Jaxline is a user-friendly framework for ML research in JAX.
 package(default_visibility = [
@@ -15,6 +15,7 @@ package_group(
     packages = [
         # dm_friend
         # dm_research
+        # ithaca/...
     ],
 )
 
@@ -33,12 +34,9 @@ py_library(
         # absl/flags
         # absl/logging
         # chex
-        # concurrent:futures
-        # enum
         # future
         # jax
         # ml_collections/config_dict
-        # typing
         # typing_extensions
         # wrapt
     ],
@@ -102,11 +100,12 @@ py_library(
     ],
 )
 
-py_strict_hermetic_test(
+jax_py_test(
     name = "utils_test",
     srcs = ["utils_test.py"],
     python_version = "PY3",
     srcs_version = "PY3",
+    tpu = False,  # Tests fail assuming single device, 1x1 has 2.
     deps = [
         ":utils",
         # proto2_pure_python  # Automatically added go/proto_python_default

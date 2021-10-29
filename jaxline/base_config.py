@@ -56,6 +56,11 @@ def get_base_config():
   config.log_tensors_interval = 60
   config.log_train_data_interval = 120.0  # None to turn off
 
+  # Overrides of `interval_type` for specific periodic operations. If `None`,
+  # we use the value of `interval_type`.
+  config.logging_interval_type = None
+  config.checkpoint_interval_type = None
+
   # If True, asynchronously logs training data from every training step.
   config.log_all_train_data = False
 
