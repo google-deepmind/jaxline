@@ -21,6 +21,7 @@ compatible with this pipeline.
 import functools
 import inspect
 import time
+from typing import Optional
 
 from absl import flags
 from absl import logging
@@ -61,11 +62,13 @@ def _initialize_experiment(experiment_class, mode, rng, experiment_kwargs):
 
 
 @utils.disable_pmap_jit
-def train(experiment_class,
-          config,
-          checkpointer: utils.Checkpointer,
-          writer: utils.Writer,
-          periodic_actions=()):
+def train(
+    experiment_class,
+    config,
+    checkpointer: utils.Checkpointer,
+    writer: Optional[utils.Writer],
+    periodic_actions=(),
+):
   """Main training loop."""
   logging.info("Training with config:\n%s", config)
   is_chief = jax.host_id() == 0
@@ -135,11 +138,13 @@ def train(experiment_class,
 
 
 @utils.disable_pmap_jit
-def evaluate(experiment_class,
-             config,
-             checkpointer: utils.Checkpointer,
-             writer: utils.Writer,
-             jaxline_mode=None):
+def evaluate(
+    experiment_class,
+    config,
+    checkpointer: utils.Checkpointer,
+    writer: Optional[utils.Writer],
+    jaxline_mode: Optional[str] = None,
+):
   """Main evaluation loop."""
   if jaxline_mode is None:
     jaxline_mode = FLAGS.jaxline_mode

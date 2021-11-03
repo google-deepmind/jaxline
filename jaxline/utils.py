@@ -39,25 +39,31 @@ import wrapt
 
 # TODO(mjoneill): Make flag more informative after copybara is set up
 _JAXLINE_POST_MORTEM = flags.DEFINE_bool(
-    "jaxline_post_mortem", False,
-    "Whether to enter into post-mortem after an exception. ")
+    name="jaxline_post_mortem",
+    default=False,
+    help="Whether to enter into post-mortem after an exception. ",
+)
 
 _JAXLINE_DISABLE_PMAP_JIT = flags.DEFINE_bool(
-    "jaxline_disable_pmap_jit", False,
-    "Whether to disable all pmaps and jits, making it easier to inspect and "
-    "trace code in a debugger.")
+    name="jaxline_disable_pmap_jit",
+    default=False,
+    help=("Whether to disable all pmaps and jits, making it easier to inspect "
+          "and trace code in a debugger."),
+)
 
 
-def _get_function_name(function) -> str:
+def _get_function_name(function: Callable[..., Any]) -> str:
   if isinstance(function, functools.partial):
     return f"partial({function.func.__name__})"
   return function.__name__
 
 
+# TODO(jaslanides): Replace these with typing.NamedTuple.
 SnapshotNT = collections.namedtuple("SnapshotNT", ["id", "pickle_nest"])
 CheckpointNT = collections.namedtuple("CheckpointNT", ["active", "history"])
 
 T = TypeVar("T")
+F = TypeVar("F", bound=Callable)
 
 
 class Writer(Protocol):
@@ -91,7 +97,8 @@ class Checkpointer(Protocol):
 
 def py_prefetch(
     iterable_function: Callable[[], Iterable[T]],
-    buffer_size: int = 5) -> Generator[T, None, None]:
+    buffer_size: int = 5,
+) -> Generator[T, None, None]:
   """Performs prefetching of elements from an iterable in a separate thread.
 
   Args:
@@ -208,7 +215,7 @@ def bcast_local_devices(value):
       lambda v: jax.device_put_sharded(len(devices) * [v], devices), value)
 
 
-def make_async(thread_name_prefix=""):
+def make_async(thread_name_prefix: str = ""):
   """Returns a decorator that runs any function it wraps in a background thread.
 
    When called, the decorated function will immediately return a future
@@ -289,7 +296,7 @@ def kwargs_only(f):
 
 
 @contextlib.contextmanager
-def log_activity(activity_name):
+def log_activity(activity_name: str):
   logging.info("[jaxline] %s starting...", activity_name)
   try:
     yield
@@ -326,7 +333,11 @@ def host_id_devices_for_rng(mode="unique_host_unique_device"):
 
 
 def specialize_rng_host_device(
-    rng, host_id, axis_name, mode="unique_host_unique_device"):
+    rng: jnp.DeviceArray,
+    host_id: Optional[int],
+    axis_name: str,
+    mode: str = "unique_host_unique_device",
+) -> jnp.DeviceArray:
   """Specializes a rng to the host/device we are on.
 
   Must be called from within a pmapped function.
@@ -357,7 +368,7 @@ def specialize_rng_host_device(
   return rng
 
 
-def rendezvous():
+def rendezvous() -> None:
   """Forces all hosts to check in."""
   with log_activity("rendezvous"):
     x = jnp.ones([jax.local_device_count()])
@@ -369,14 +380,16 @@ def rendezvous():
 class PeriodicAction:
   """An action that executes periodically (e.g. logging)."""
 
-  def __init__(self,
-               fn: Callable[[int, Dict[str, float]], None],
-               interval_type: str,
-               interval: float,
-               start_time: float = 0.0,
-               start_step: int = 0,
-               run_async: bool = True,
-               log_all_data: bool = False):
+  def __init__(
+      self,
+      fn: Callable[[int, Dict[str, float]], None],
+      interval_type: str,
+      interval: float,
+      start_time: float = 0.0,
+      start_step: int = 0,
+      run_async: bool = True,
+      log_all_data: bool = False,
+  ):
     """Initializes attributes for periodic action.
 
     Args:
@@ -440,8 +453,12 @@ class PeriodicAction:
       logging.info("Waiting for a periodic action to finish...")
       self._apply_fn_future.result()
 
-  def __call__(self, t: float, step: int, scalar_outputs: Dict[str,
-                                                               jnp.ndarray]):
+  def __call__(
+      self,
+      t: float,
+      step: int,
+      scalar_outputs: Dict[str, jnp.ndarray],
+  ) -> None:
     """Calls periodic action if interval since last call sufficiently large.
 
     Args:
@@ -459,7 +476,7 @@ class PeriodicAction:
       self.log[step] = scalar_outputs
 
 
-def debugger_fallback(f):
+def debugger_fallback(f: F) -> F:
   """Maybe wraps f with a pdb-callback."""
   @functools.wraps(f)
   def inner_wrapper(*args, **kwargs):
@@ -475,7 +492,7 @@ def debugger_fallback(f):
   return inner_wrapper
 
 
-def evaluate_should_return_dict(f):
+def evaluate_should_return_dict(f: F) -> F:
   """Prints a deprecation warning for old-usage of evaluate.
 
   As of cl/302532551 the evaluate method on an experiment should
@@ -500,6 +517,7 @@ def evaluate_should_return_dict(f):
       "After May 1st 2020 this code will be updated and returning None will "
       "error.")
 
+  @functools.wraps(f)
   def evaluate_with_warning(*args, **kwargs):
     evaluate_out = f(*args, **kwargs)
     if evaluate_out is None:
@@ -517,7 +535,7 @@ GLOBAL_CHECKPOINT_DICT = {}
 class InMemoryCheckpointer:
   """A Checkpointer reliant on an in-memory global dictionary."""
 
-  def __init__(self, config, mode):
+  def __init__(self, config, mode: str):
     self._max_checkpoints_to_keep = config.max_checkpoints_to_keep
     del mode
 
@@ -537,7 +555,7 @@ class InMemoryCheckpointer:
       else:
         current_state[sk] = sv
 
-  def get_experiment_state(self, ckpt_series):
+  def get_experiment_state(self, ckpt_series: str):
     """Returns the experiment state for a given checkpoint series."""
     if ckpt_series not in GLOBAL_CHECKPOINT_DICT:
       active = threading.local()
@@ -548,7 +566,7 @@ class InMemoryCheckpointer:
           config_dict.ConfigDict())
     return GLOBAL_CHECKPOINT_DICT[ckpt_series].active.state
 
-  def save(self, ckpt_series) -> None:
+  def save(self, ckpt_series: str) -> None:
     """Saves the checkpoint."""
     series = GLOBAL_CHECKPOINT_DICT[ckpt_series]
     active_state = self.get_experiment_state(ckpt_series)
@@ -560,12 +578,12 @@ class InMemoryCheckpointer:
           history=series.history[-self._max_checkpoints_to_keep:])
     logging.info("Saved checkpoint %s with id %s.", ckpt_series, id_)
 
-  def can_be_restored(self, ckpt_series) -> bool:
+  def can_be_restored(self, ckpt_series: str) -> bool:
     """Returns whether or not a given checkpoint series can be restored."""
     return ((ckpt_series in GLOBAL_CHECKPOINT_DICT) and
             GLOBAL_CHECKPOINT_DICT[ckpt_series].history)
 
-  def restore(self, ckpt_series) -> None:
+  def restore(self, ckpt_series: str) -> None:
     """Restores the checkpoint."""
     snapshot = GLOBAL_CHECKPOINT_DICT[ckpt_series].history[-1].pickle_nest
     current_state = self.get_experiment_state(ckpt_series)
@@ -573,7 +591,7 @@ class InMemoryCheckpointer:
     logging.info("Returned checkpoint %s with id %s.", ckpt_series,
                  GLOBAL_CHECKPOINT_DICT[ckpt_series].history[-1].id)
 
-  def restore_path(self, ckpt_series) -> Optional[str]:
+  def restore_path(self, ckpt_series: str) -> Optional[str]:
     """Returns the restore path for the checkpoint, or None."""
     if not self.can_be_restored(ckpt_series):
       return None
@@ -583,7 +601,7 @@ class InMemoryCheckpointer:
     """Waits for any async checkpointing to complete."""
 
 
-def disable_pmap_jit(fn: Callable[..., Any]) -> Callable[..., Any]:
+def disable_pmap_jit(fn: F) -> F:
   """Disables pmaps/jits inside a function if `--jaxline_disable_pmap_jit=True`.
 
   Args:

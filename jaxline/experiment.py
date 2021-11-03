@@ -47,7 +47,7 @@ class AbstractExperiment(abc.ABC):
   NON_BROADCAST_CHECKPOINT_ATTRS = {}
 
   @abc.abstractmethod
-  def __init__(self, mode, init_rng=None):
+  def __init__(self, mode: str, init_rng: Optional[jnp.DeviceArray] = None):
     """Constructs the experiment.
 
     Args:
@@ -58,11 +58,13 @@ class AbstractExperiment(abc.ABC):
     # TODO(mjoneill): Make init_rng non-optional after users have transitioned.
 
   @abc.abstractmethod
-  def step(self,
-           *,
-           global_step: jnp.ndarray,
-           rng: jnp.ndarray,
-           writer: Optional[utils.Writer]) -> Dict[str, np.ndarray]:
+  def step(
+      self,
+      *,
+      global_step: jnp.ndarray,
+      rng: jnp.ndarray,
+      writer: Optional[utils.Writer],
+  ) -> Dict[str, np.ndarray]:
     """Performs a step of computation e.g. a training step.
 
     This function will be wrapped by `utils.kwargs_only` meaning that when
@@ -115,14 +117,21 @@ class AbstractExperiment(abc.ABC):
       A dictionary of scalar `np.array`s to be logged.
     """
 
-  def should_run_step(self, global_step: int,
-                      config: config_dict.ConfigDict) -> bool:
+  def should_run_step(
+      self,
+      global_step: int,
+      config: config_dict.ConfigDict,
+  ) -> bool:
     """Returns whether the step function will be run given the global_step."""
     return global_step < config.training_steps
 
-  def train_loop(self, config: config_dict.ConfigDict, state,
-                 periodic_actions: List[utils.PeriodicAction],
-                 writer: Optional[utils.Writer] = None):
+  def train_loop(
+      self,
+      config: config_dict.ConfigDict,
+      state,
+      periodic_actions: List[utils.PeriodicAction],
+      writer: Optional[utils.Writer] = None,
+  ) -> None:
     """Default training loop implementation.
 
     Can be overridden for advanced use cases that need a different training loop
@@ -196,7 +205,10 @@ class AbstractExperiment(abc.ABC):
       snapshot_state[chk_name] = getattr(self, attr_name)
     return snapshot_state
 
-  def restore_from_snapshot(self, snapshot_state: Mapping[str, jnp.ndarray]):
+  def restore_from_snapshot(
+      self,
+      snapshot_state: Mapping[str, jnp.ndarray],
+  ) -> None:
     """Restores experiment state from a snapshot.
 
     Args:

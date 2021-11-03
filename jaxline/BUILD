@@ -1,3 +1,4 @@
+load("//devtools/python/blaze:pytype.bzl", "pytype_strict_library")
 load("//learning/deepmind/jax:build_defs.bzl", "jax_py_test")
 
 # Description: Jaxline is a user-friendly framework for ML research in JAX.
@@ -19,7 +20,7 @@ package_group(
     ],
 )
 
-py_library(
+pytype_strict_library(
     name = "base_config",
     srcs = ["base_config.py"],
     deps = [
@@ -27,14 +28,13 @@ py_library(
     ],
 )
 
-py_library(
+pytype_strict_library(
     name = "utils",
     srcs = ["utils.py"],
     deps = [
         # absl/flags
         # absl/logging
         # chex
-        # future
         # jax
         # ml_collections/config_dict
         # typing_extensions
@@ -56,7 +56,7 @@ py_test(
     ],
 )
 
-py_library(
+pytype_strict_library(
     name = "train",
     srcs = ["train.py"],
     srcs_version = "PY3",
@@ -68,7 +68,7 @@ py_library(
     ],
 )
 
-py_library(
+pytype_strict_library(
     name = "experiment",
     srcs = ["experiment.py"],
     srcs_version = "PY3",
@@ -81,7 +81,7 @@ py_library(
     ],
 )
 
-py_library(
+pytype_strict_library(
     name = "platform",
     srcs = ["platform.py"],
     srcs_version = "PY3",

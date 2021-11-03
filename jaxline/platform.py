@@ -33,22 +33,31 @@ import numpy as np
 
 import tensorflow as tf
 
-FLAGS = flags.FLAGS
-
 
 # TODO(tomhennigan) Add support for ipdb and pudb.
-config_flags.DEFINE_config_file(
-    "config", help_string="Training configuration file.")
+_CONFIG = config_flags.DEFINE_config_file(
+    name="config",
+    help_string="Training configuration file.",
+)
 # This flag is expected to be used only internally by jaxline.
 # It is prefixed by "jaxline" to prevent a conflict with a "mode" flag defined
 # by Monarch.
 _JAXLINE_MODE = flags.DEFINE_string(
-    "jaxline_mode", "train",
-    ("Execution mode: `train` will run training, `eval` will run evaluation."))
-_JAXLINE_TPU_DRIVER = flags.DEFINE_string("jaxline_tpu_driver", "",
-                                          "Whether to use tpu_driver.")
+    name="jaxline_mode",
+    default="train",
+    help=("Execution mode. "
+          " `train` will run training, `eval` will run evaluation."),
+)
+_JAXLINE_TPU_DRIVER = flags.DEFINE_string(
+    name="jaxline_tpu_driver",
+    default="",
+    help="Whether to use tpu_driver.",
+)
 _JAXLINE_ENSURE_TPU = flags.DEFINE_bool(
-    "jaxline_ensure_tpu", False, "Whether to ensure we have a TPU connected.")
+    name="jaxline_ensure_tpu",
+    default=False,
+    help="Whether to ensure we have a TPU connected.",
+)
 
 
 def create_checkpointer(
@@ -96,15 +105,10 @@ def create_writer(config: config_dict.ConfigDict, mode: str) -> Any:
 def main(experiment_class, argv, checkpointer_factory=create_checkpointer):
   """Main potentially under a debugger."""
   del argv  # Unused.
-  # Because we renamed "mode" to "jaxline_mode on March 5, 2020, we add this
-  # to prevent people depending on this flag to have strange bugs. Instead
-  # it will raise a clear `AttributeError`. This can safely be removed from
-  # April 2020.
-  if "mode" in FLAGS:
-    del FLAGS.mode
 
   # Make sure the required fields are available in the config.
-  base_config.validate_config(FLAGS.config)
+  config = _CONFIG.value
+  base_config.validate_config(config)
 
   if _JAXLINE_TPU_DRIVER.value:
     jax.config.update("jax_xla_backend", "tpu_driver")
@@ -119,7 +123,6 @@ def main(experiment_class, argv, checkpointer_factory=create_checkpointer):
     # acceptable failures per-task to allow for this.
     # TODO(tomhennigan) This test will eventually be part of JAX itself.
     chex.assert_tpu_available()
-  config = FLAGS.config
 
   jaxline_mode = _JAXLINE_MODE.value
   if jaxline_mode == "train":
