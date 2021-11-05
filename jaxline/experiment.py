@@ -55,7 +55,7 @@ class AbstractExperiment(abc.ABC):
       init_rng: A `PRNGKey` to use for experiment initialization.
     """
 
-    # TODO(mjoneill): Make init_rng non-optional after users have transitioned.
+    # TODO(b/205109371): Make init_rng non-optional.
 
   @abc.abstractmethod
   def step(
@@ -196,9 +196,7 @@ class AbstractExperiment(abc.ABC):
       logging.warning(
           "Your experiment's self.CHECKPOINT_ATTRS and "
           "self.NON_BROADCAST_CHECKPOINT_ATTRS are empty. Your job will not "
-          "checkpoint any state or parameters. See "
-          "learning/deepmind/research/jax/pipeline/examples/imagenet/"
-          "experiment.py for an example of specifying values to checkpoint.")
+          "checkpoint any state or parameters.")
     for attr_name, chk_name in self.CHECKPOINT_ATTRS.items():
       snapshot_state[chk_name] = utils.get_first(getattr(self, attr_name))
     for attr_name, chk_name in self.NON_BROADCAST_CHECKPOINT_ATTRS.items():

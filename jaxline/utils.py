@@ -37,7 +37,6 @@ from ml_collections import config_dict
 from typing_extensions import Protocol
 import wrapt
 
-# TODO(mjoneill): Make flag more informative after copybara is set up
 _JAXLINE_POST_MORTEM = flags.DEFINE_bool(
     name="jaxline_post_mortem",
     default=False,
@@ -492,14 +491,15 @@ def debugger_fallback(f: F) -> F:
   return inner_wrapper
 
 
+# TODO(b/205109371): Remove support for `evaluate` that doesn't return a dict.
 def evaluate_should_return_dict(f: F) -> F:
   """Prints a deprecation warning for old-usage of evaluate.
 
-  As of cl/302532551 the evaluate method on an experiment should
+  The `evaluate` method on an experiment should
   return a dictionary of scalars to be logged, just like the step method.
 
-  Until May 1st 2020, evaluate is also allowed to return nothing (the
-  older behavior). After that date, returning nothing will be an error.
+  `evaluate` is currently allowed to return nothing (the
+  older behavior). Soon, returning nothing will be an error.
   Please update old code. If you do not wish Jaxline to log anything for you,
   return an empty dictionary. Otherwise a dictionary of scalars may be returned
   like `step`.
@@ -514,8 +514,7 @@ def evaluate_should_return_dict(f: F) -> F:
       "Your experiment\'s evaluate function returned no output, this is "
       "deprecated behavior. `evaluate` should now return a dictionary of "
       "scalars to log, just like `step`. Please update your code. "
-      "After May 1st 2020 this code will be updated and returning None will "
-      "error.")
+      "We will soon update this code and returning None will error.")
 
   @functools.wraps(f)
   def evaluate_with_warning(*args, **kwargs):

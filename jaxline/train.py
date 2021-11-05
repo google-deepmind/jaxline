@@ -45,8 +45,9 @@ def _initialize_experiment(experiment_class, mode, rng, experiment_kwargs):
     experiment = experiment_class(
         mode, init_rng=rng, **experiment_kwargs)
   else:
+    # TODO(b/205109371): Make init_rng non-optional.
     logging.warning(
-        "As of cl/339673620 you should add init_rng to your Experiment"
+        "You should add init_rng to your Experiment"
         " constructor, which we will use to pass you"
         " jaxline.base_config.random_seed. Please deprecate any use of"
         " experiment_kwargs.config.random_seed: model initialization should"
@@ -55,8 +56,7 @@ def _initialize_experiment(experiment_class, mode, rng, experiment_kwargs):
         " experiment_kwargs.config.random_seed was flawed design introduced"
         " by some of our JAXline examples and meant that the rng used for"
         " initialization (and sweeps) was decoupled from that used by the"
-        " step function. We will enforce the change, breaking any remaining"
-        " users who haven't transitioned, on 01/01/21")
+        " step function. This will soon become unsupported behaviour.")
     experiment = experiment_class(mode, **experiment_kwargs)
   return experiment
 
