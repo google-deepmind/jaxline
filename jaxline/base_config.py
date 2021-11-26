@@ -40,8 +40,35 @@ def validate_keys(base_cfg, config, base_filename="base_config.py"):
       validate_keys(base_cfg[key], config[key])
 
 
+def check_constraints(config):
+  """Validates that the config parameters comply to specific set of rules.
+
+  Args:
+    config (`ConfigDict`): experiment config to be checked against base_cfg.
+
+  Raises:
+    ValueError: if config has train_checkpoint_all_hosts set to True and the
+      resulting interval type for checkpointing is time-based (secs).
+  """
+
+  if config.train_checkpoint_all_hosts:
+    if config.checkpoint_interval_type not in ["steps", None] or (
+        config.checkpoint_interval_type is None and
+        config.interval_type != "steps"):
+      raise ValueError(
+          "Invalid interval type selected for the experiment. "
+          'When "train_checkpoint_all_hosts = True" True, you need to specify '
+          '"checkpoint_interval_type = steps". This is to avoid saving '
+          "checkpoints with different global_step on different hosts, which "
+          "causes hosts to run out of sync upon restore. Got: "
+          f"train_checkpoint_all_hosts: {config.train_checkpoint_all_hosts}, "
+          f"interval_type: {config.interval_type}, "
+          f"checkpoint_interval_type: {config.checkpoint_interval_type}.")
+
+
 def validate_config(config):
   validate_keys(get_base_config(), config)
+  check_constraints(config)
 
 
 def get_base_config():
@@ -60,6 +87,10 @@ def get_base_config():
   # we use the value of `interval_type`.
   config.logging_interval_type = None
   config.checkpoint_interval_type = None
+
+  # If set to True we checkpoint on all hosts, which may be useful
+  # for model parallelism. Otherwise we checkpoint on host 0.
+  config.train_checkpoint_all_hosts = False
 
   # If True, asynchronously logs training data from every training step.
   config.log_all_train_data = False
