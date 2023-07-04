@@ -571,6 +571,15 @@ class InMemoryCheckpointer:
     active_state = self.get_experiment_state(ckpt_series)
     id_ = 0 if not series.history else series.history[-1].id + 1
     snapshot = copy.copy(active_state)
+    for sk, sv in snapshot.items():
+      # Duck-typing for "is this a Jaxline Experiment class?".
+      if hasattr(sv, "CHECKPOINT_ATTRS"):
+        snapshot[sk] = copy.copy(sv)
+        for kk in sv.CHECKPOINT_ATTRS:
+          attr = getattr(sv, kk)
+          copied_attr = jax.tree_map(
+              lambda x: x.copy() if hasattr(x, 'copy') else x, attr)
+          setattr(sv, kk, copied_attr)
     series.history.append(SnapshotNT(id_, snapshot))
     if len(series.history) > self._max_checkpoints_to_keep:
       GLOBAL_CHECKPOINT_DICT[ckpt_series] = series._replace(
