@@ -47,7 +47,7 @@ class AbstractExperiment(abc.ABC):
   NON_BROADCAST_CHECKPOINT_ATTRS = {}
 
   @abc.abstractmethod
-  def __init__(self, mode: str, init_rng: Optional[jnp.DeviceArray] = None):
+  def __init__(self, mode: str, init_rng: Optional[jax.Array] = None):
     """Constructs the experiment.
 
     Args:

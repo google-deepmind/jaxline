@@ -332,11 +332,11 @@ def host_id_devices_for_rng(mode="unique_host_unique_device"):
 
 
 def specialize_rng_host_device(
-    rng: jnp.DeviceArray,
+    rng: jax.Array,
     host_id: Optional[int],
     axis_name: str,
     mode: str = "unique_host_unique_device",
-) -> jnp.DeviceArray:
+) -> jax.Array:
   """Specializes a rng to the host/device we are on.
 
   Must be called from within a pmapped function.
