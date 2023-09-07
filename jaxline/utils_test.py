@@ -27,6 +27,10 @@ from jaxline import utils
 import numpy as np
 
 
+def _num_unique_keys(keys):
+  return len(np.unique(jax.random.key_data(keys), axis=0))
+
+
 class PyPrefetchTest(absltest.TestCase):
 
   def testEmpty(self):
@@ -238,8 +242,7 @@ class TestSpecializeRngHostDevice(absltest.TestCase):
 
     rng = specialize_func(self.rng, host_id_devices)
 
-    self.assertEqual(
-        np.unique(rng, axis=0).shape[0], jax.local_device_count())
+    self.assertEqual(_num_unique_keys(rng), jax.local_device_count())
 
   def test_same_device(self):
     """Tests rngs are same across devices."""
@@ -251,28 +254,27 @@ class TestSpecializeRngHostDevice(absltest.TestCase):
         mode=mode), axis_name="i")
     rng = specialize_func(self.rng, host_id_devices)
 
-    self.assertEqual(
-        np.unique(rng, axis=0).shape[0], 1)
+    self.assertEqual(_num_unique_keys(rng), 1)
 
   def test_unique_host(self):
     """Tests rngs unique between hosts."""
 
     mode = "unique_host_same_device"
-    with mock.patch.object(utils.jax, "host_id", return_value=0):
+    with mock.patch.object(utils.jax, "process_index", return_value=0):
       host_id_devices = utils.host_id_devices_for_rng(mode)
       specialize_func = jax.pmap(functools.partial(
           utils.specialize_rng_host_device, axis_name="i",
           mode=mode), axis_name="i")
       rng0 = specialize_func(self.rng, host_id_devices)
-    with mock.patch.object(utils.jax, "host_id", return_value=1):
+    with mock.patch.object(utils.jax, "process_index", return_value=1):
       host_id_devices = utils.host_id_devices_for_rng(mode)
       specialize_func = jax.pmap(functools.partial(
           utils.specialize_rng_host_device, axis_name="i",
           mode=mode), axis_name="i")
       rng1 = specialize_func(self.rng, host_id_devices)
 
-    self.assertEqual(
-        np.unique(np.concatenate([rng0, rng1], axis=0), axis=0).shape[0], 2)
+    keys = jnp.concatenate([rng0, rng1], axis=0)
+    self.assertEqual(_num_unique_keys(keys), 2)
 
 
 class TestRendezvous(absltest.TestCase):
@@ -321,6 +323,47 @@ class DoubleBufferTest(absltest.TestCase):
     self.assertEqual(batch_ptrs[1], batch_ptrs[3])
     self.assertNotEqual(batch_ptrs[0], batch_ptrs[1])
     self.assertNotEqual(batch_ptrs[2], batch_ptrs[3])
+
+
+class PeriodicActionTest(absltest.TestCase):
+  """Tests for PeriodicAction."""
+
+  def test_log_growth_ratios(self):
+    """Checks a specific value of growth ratios logs as expected."""
+    data = []
+    logger = utils.PeriodicAction(
+        fn=lambda step, _: data.append(step),  # fn logs step to data
+        interval_type="steps",
+        interval=1_000_000,  # Large interval won't get called early on.
+        logging_growth_ratios=[1, 2, 5, 10],  # Example growth ratios
+    )
+
+    for step in range(1010):
+      logger(time.time(), step+1, {"fake_data": 0})  # pytype: disable=wrong-arg-types  # jax-ndarray
+    logger.wait_to_finish()
+
+    # Check that we got the results that we expected
+    target_data = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
+    self.assertEqual(data, target_data)
+
+  def test_log_last_step(self):
+    """Checks that when it's enabled, we also log the last step."""
+    data = []
+    logger = utils.PeriodicAction(
+        fn=lambda step, _: data.append(step),  # fn logs step to data
+        interval_type="steps",
+        interval=200,
+        end_step_to_action=1010,
+    )
+
+    for step in range(1010):
+      logger(time.time(), step+1, {"fake_data": 0})  # pytype: disable=wrong-arg-types  # jax-ndarray
+    logger.wait_to_finish()
+
+    # Check that we got the results that we expected
+    target_data = [200, 400, 600, 800, 1000, 1010]
+    self.assertEqual(data, target_data)
+
 
 if __name__ == "__main__":
   absltest.main()
