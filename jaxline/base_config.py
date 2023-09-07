@@ -73,7 +73,6 @@ def check_constraints(config):
           "config.interval_type='steps'."
       )
 
-
 def validate_config(config):
   validate_keys(get_base_config(), config)
   check_constraints(config)
