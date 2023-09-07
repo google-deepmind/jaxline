@@ -25,7 +25,7 @@ import queue
 import sys
 import threading
 
-from typing import Any, Callable, Dict, Generator, Iterable, Mapping, Optional, TypeVar
+from typing import Any, Callable, Dict, Generator, Iterable, Mapping, Optional, Sequence, TypeVar
 
 from absl import flags
 from absl import logging
@@ -97,6 +97,8 @@ class Checkpointer(Protocol):
 def py_prefetch(
     iterable_function: Callable[[], Iterable[T]],
     buffer_size: int = 5,
+    *,
+    thread_name: Optional[str] = None,
 ) -> Generator[T, None, None]:
   """Performs prefetching of elements from an iterable in a separate thread.
 
@@ -106,6 +108,7 @@ def py_prefetch(
       thread (crucial if working with tensorflow datasets because tf.graph
       objects are thread local).
     buffer_size (int): Number of elements to keep in the prefetch buffer.
+    thread_name (str): Optional name for the producer thread.
 
   Yields:
     Prefetched elements from the original iterable.
@@ -137,7 +140,7 @@ def py_prefetch(
     finally:
       buffer.put(end)
 
-  threading.Thread(target=producer, daemon=True).start()
+  threading.Thread(target=producer, daemon=True, name=thread_name).start()
 
   # Consumer.
   while True:
@@ -163,10 +166,11 @@ def double_buffer_on_gpu(ds):
 
 
 def _device_put_sharded(sharded_tree, devices):
-  leaves, treedef = jax.tree_flatten(sharded_tree)
+  leaves, treedef = jax.tree_util.tree_flatten(sharded_tree)
   n = leaves[0].shape[0]
   return jax.device_put_sharded(
-      [jax.tree_unflatten(treedef, [l[i] for l in leaves]) for i in range(n)],
+      [jax.tree_util.tree_unflatten(
+          treedef, [l[i] for l in leaves]) for i in range(n)],
       devices)
 
 
@@ -192,25 +196,27 @@ def double_buffer(ds: Iterable[T]) -> Generator[T, None, None]:
   """
   batch = None
   devices = jax.local_devices()
+  device_put_sharded = make_async("async_device_put_sharded")(  # pylint: disable=no-value-for-parameter
+      _device_put_sharded)
   for next_batch in ds:
     assert next_batch is not None
-    next_batch = _device_put_sharded(next_batch, devices)
+    next_batch = device_put_sharded(next_batch, devices)  # pylint: disable=not-callable
     if batch is not None:
-      yield batch
+      yield batch.result()
     batch = next_batch
   if batch is not None:
-    yield batch
+    yield batch.result()
 
 
 def get_first(xs):
   """Gets values from the first device."""
-  return jax.tree_map(lambda x: x[0], xs)
+  return jax.tree_util.tree_map(lambda x: x[0], xs)
 
 
 def bcast_local_devices(value):
   """Broadcasts an object to all local devices."""
   devices = jax.local_devices()
-  return jax.tree_map(
+  return jax.tree_util.tree_map(
       lambda v: jax.device_put_sharded(len(devices) * [v], devices), value)
 
 
@@ -328,15 +334,15 @@ class DistributedRNGMode(enum.Enum):
 def host_id_devices_for_rng(mode="unique_host_unique_device"):
   if not DistributedRNGMode(mode).unique_host:
     return None
-  return jnp.broadcast_to(jax.host_id(), (jax.local_device_count(),))
+  return jnp.broadcast_to(jax.process_index(), (jax.local_device_count(),))
 
 
 def specialize_rng_host_device(
-    rng: jnp.DeviceArray,
+    rng: jax.Array,
     host_id: Optional[int],
     axis_name: str,
     mode: str = "unique_host_unique_device",
-) -> jnp.DeviceArray:
+) -> jax.Array:
   """Specializes a rng to the host/device we are on.
 
   Must be called from within a pmapped function.
@@ -355,9 +361,9 @@ def specialize_rng_host_device(
   # Will throw an error if mode is not a valid enumeration.
   enum_mode = DistributedRNGMode(mode)
   if enum_mode.unique_host:
-    # Note that we intentionally do NOT call `jax.host_id()` here, taking it as
-    # an input instead. This is because we don't want to (effectively) use a
-    # hard-coded Python int inside a potentially `pmap`ped context as that
+    # Note that we intentionally do NOT call `jax.process_index()` here, taking
+    # it as an input instead. This is because we don't want to (effectively) use
+    # a hard-coded Python int inside a potentially `pmap`ped context as that
     # results in different executable fingerprints across hosts.
     if host_id is None:
       raise ValueError(f"host_id must be given in RNG mode: {enum_mode}")
@@ -388,6 +394,8 @@ class PeriodicAction:
       start_step: int = 0,
       run_async: bool = True,
       log_all_data: bool = False,
+      logging_growth_ratios: Optional[Sequence[float]] = None,
+      end_step_to_action: Optional[int] = None,
   ):
     """Initializes attributes for periodic action.
 
@@ -403,19 +411,33 @@ class PeriodicAction:
       run_async: boolean whether to run this perodic action in a background
         thread.
       log_all_data: boolean whether to accumulate scalar_outputs at each step.
+      logging_growth_ratios: optional sequence of ratios of steps that will
+        get logged in terms of powers of ten. For example, pass [1, 2, 5, 10]
+        then steps [1, 2, 5, 10, 20, 50, ...] are logged in *addition* to the
+        standard intervals. Only used for interval_type='steps'. This is useful
+        to allow for more logging early in training, and less later on.
+      end_step_to_action: If not None, then it is the final step of training, on
+        which we will call the action regardless.
     """
     if interval_type not in ["secs", "steps"]:
       raise ValueError(f"Unrecognized interval type {interval_type}.")
     self._fn = fn
     self._interval_type = interval_type
     self._interval = interval
+    self._init_interval = interval
     self._prev_time = start_time
     self._prev_step = start_step
+    self._end_step_to_action = end_step_to_action
     self._apply_fn_future = None
     if run_async:
       self._apply_fn = make_async(self._fn.__name__)(self._apply_fn)  # pylint: disable=no-value-for-parameter
     self.log_all_data = log_all_data
     self.log = {}
+
+    self._logging_growth_ratios = logging_growth_ratios
+    # This is only supported when interval_type='steps'
+    if self._interval_type != "steps":
+      assert self._logging_growth_ratios is None
 
   def _apply_fn(self, step, steps_per_sec, scalar_outputs):
     """Runs periodic action, optionally dumping all intermediate logged data."""
@@ -435,11 +457,26 @@ class PeriodicAction:
       self._fn(logged_step, logged_scalars)
 
   def _apply_condition(self, t: float, step: int):
+    """Checks to see if we should perform the periodic action."""
+    if self._end_step_to_action and step == self._end_step_to_action:
+      return True
+
     if self._interval_type == "secs":
       return t - self._prev_time >= self._interval
     else:
       assert self._interval_type == "steps"  # error should've be caught in init
-      return step % self._interval == 0
+
+      # Check for logging intervals that come at growth ratios
+      growth_log = False
+      if self._logging_growth_ratios:
+        exponent = jnp.floor(jnp.log10(jnp.maximum(1, step)))
+        valid_ratios = jnp.round(jnp.array(
+            [ratio * 10**exponent for ratio in self._logging_growth_ratios]))
+        growth_log = any(jnp.isclose(step, valid_ratios))
+
+      # Log if a growth logging step *or* divisible by interval
+      interval_log = step % self._interval == 0
+      return growth_log or interval_log
 
   def update_time(self, t: float, step: int):
     """Updates the internal time measurements."""
@@ -467,8 +504,9 @@ class PeriodicAction:
     """
     if self._apply_condition(t, step):
       steps_per_sec = (step - self._prev_step) / (t - self._prev_time)
-      self._apply_fn_future = self._apply_fn(step, steps_per_sec,
-                                             scalar_outputs)
+      self._apply_fn_future = self._apply_fn(  # pylint: disable=not-callable
+          step, steps_per_sec, scalar_outputs)
+
       self.update_time(t, step)
     elif self.log_all_data:
       # Log data for dumping at next interval.
@@ -550,7 +588,7 @@ class InMemoryCheckpointer:
         for kk in sv.NON_BROADCAST_CHECKPOINT_ATTRS:
           setattr(
               current_state[sk], kk,
-              jax.tree_map(copy.copy, getattr(sv, kk)))
+              jax.tree_util.tree_map(copy.copy, getattr(sv, kk)))
       else:
         current_state[sk] = sv
 

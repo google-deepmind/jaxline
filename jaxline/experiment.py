@@ -47,7 +47,7 @@ class AbstractExperiment(abc.ABC):
   NON_BROADCAST_CHECKPOINT_ATTRS = {}
 
   @abc.abstractmethod
-  def __init__(self, mode: str, init_rng: Optional[jnp.DeviceArray] = None):
+  def __init__(self, mode: str, init_rng: Optional[jax.Array] = None):
     """Constructs the experiment.
 
     Args:
@@ -56,6 +56,26 @@ class AbstractExperiment(abc.ABC):
     """
 
     # TODO(b/205109371): Make init_rng non-optional.
+
+  def initialize_train_step_rng(self, rng: jnp.ndarray) -> jnp.ndarray:
+    """Initializes train_step_rng on devices as a suitable JAX array.
+
+    Ensures the rng key is placed on the devices in the desired way, producing
+    a JAX array of required type (i.e. `ShardedDeviceArray` or
+    `GlobalDeviceArray`), partitioning and shape.
+
+    The default implementation broadcasts the key to all local devices, forming
+    a `ShardedDeviceArray` with a new leading axis. This behavior is suitable
+    for the pmap-based data-parallel training.
+
+    Args:
+      rng: a single `PRNGKey`.
+
+    Returns:
+      A JAX array representing a desired configuration of rng keys on devices,
+      ready to use in the training loop.
+    """
+    return utils.bcast_local_devices(rng)
 
   @abc.abstractmethod
   def step(
@@ -162,7 +182,13 @@ class AbstractExperiment(abc.ABC):
     global_step_devices = np.broadcast_to(state.global_step,
                                           [jax.local_device_count()])
     host_id_devices = utils.host_id_devices_for_rng(config.random_mode_train)
-    step_key = state.train_step_rng
+    if host_id_devices is not None:
+      # Transfer to device to avoid host->device transfer on every step.
+      host_id_devices = jax.pmap(lambda x: x)(host_id_devices)
+
+    # Get step key for first step, do not update global_step_devices yet.
+    _, (step_key, state.train_step_rng) = next_device_state(
+        global_step_devices, state.train_step_rng, host_id_devices)
 
     with utils.log_activity("training loop"):
       while self.should_run_step(state.global_step, config):
@@ -182,7 +208,7 @@ class AbstractExperiment(abc.ABC):
                                 host_id_devices))
 
         for action in periodic_actions:
-          action(t, state.global_step, scalar_outputs)
+          action(t, state.global_step, scalar_outputs)  # pytype: disable=wrong-arg-types  # jax-ndarray
 
   def snapshot_state(self) -> Mapping[str, jnp.ndarray]:
     """Takes a frozen copy of the current experiment state for checkpointing.
@@ -232,3 +258,17 @@ class AbstractExperiment(abc.ABC):
     clear(self.NON_BROADCAST_CHECKPOINT_ATTRS)
     write(self.CHECKPOINT_ATTRS, broadcast=True)
     write(self.NON_BROADCAST_CHECKPOINT_ATTRS)
+
+  def on_new_best_model(self, best_state):
+    """Hook to perform a custom logic when the best model is obtained.
+
+    This method will be run before each best model checkpoint save and can
+    implement any custom logic (checkpointing will still be done by jaxline).
+
+    It will only be run if jaxline is configured to track the best model,
+    i.e. if `config.best_model_eval_metric` is set.
+
+    Args:
+     best_state: Evaluator best state. Holds `best_eval_metric_value`. The state
+     can also be mutated to dump additional information from the evaluator.
+    """

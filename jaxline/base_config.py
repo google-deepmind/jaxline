@@ -40,8 +40,43 @@ def validate_keys(base_cfg, config, base_filename="base_config.py"):
       validate_keys(base_cfg[key], config[key])
 
 
+def check_constraints(config):
+  """Validates that the config parameters comply to specific set of rules.
+
+  Args:
+    config (`ConfigDict`): experiment config to be checked against base_cfg.
+
+  Raises:
+    ValueError: if config has train_checkpoint_all_hosts set to True and the
+      resulting interval type for checkpointing is time-based (secs).
+  """
+
+  if config.train_checkpoint_all_hosts:
+    if config.checkpoint_interval_type not in ["steps", None] or (
+        config.checkpoint_interval_type is None and
+        config.interval_type != "steps"):
+      raise ValueError(
+          "Invalid interval type selected for the experiment. "
+          'When "train_checkpoint_all_hosts = True" True, you need to specify '
+          '"checkpoint_interval_type = steps". This is to avoid saving '
+          "checkpoints with different global_step on different hosts, which "
+          "causes hosts to run out of sync upon restore. Got: "
+          f"train_checkpoint_all_hosts: {config.train_checkpoint_all_hosts}, "
+          f"interval_type: {config.interval_type}, "
+          f"checkpoint_interval_type: {config.checkpoint_interval_type}.")
+
+    if (config.periodic_action_growth_ratios is not None
+        and config.interval_type != "steps"):
+      raise ValueError(
+          f"Invalid interval type {config.interval_type}."
+          "When you set periodic_action_growth_ratios you must use "
+          "config.interval_type='steps'."
+      )
+
+
 def validate_config(config):
   validate_keys(get_base_config(), config)
+  check_constraints(config)
 
 
 def get_base_config():
@@ -54,12 +89,31 @@ def get_base_config():
   config.interval_type = "secs"
   config.save_checkpoint_interval = 300
   config.log_tensors_interval = 60
+
+  # This is an optional config to allow for logging at growth ratios.
+  # This logging is *in addition* to the standard linear intervals.
+  # For example, setting [1, 2, 5, 10] will log at [1, 2, 5, 10, 20, 50, ...]
+  # Should only be used with interval_type="steps".
+  config.periodic_action_growth_ratios = None
   config.log_train_data_interval = 120.0  # None to turn off
+  config.log_async = True
+  # Log from all training hosts. You can facet on jax_process_index.
+  config.log_all_hosts = False
 
   # Overrides of `interval_type` for specific periodic operations. If `None`,
   # we use the value of `interval_type`.
   config.logging_interval_type = None
   config.checkpoint_interval_type = None
+
+  # If set to True we save the initial checkpoint before executing the first
+  # train step. This speeds up eval worker start time as they can immediately
+  # begin compilation, and sets a reference point for init model performance.
+  config.save_initial_train_checkpoint = False
+
+  # If set to True we checkpoint on all hosts, which may be useful
+  # for model parallelism. Otherwise we checkpoint on host 0.
+  config.train_checkpoint_all_hosts = False
+  config.best_checkpoint_all_hosts = False
 
   # If True, asynchronously logs training data from every training step.
   config.log_all_train_data = False
