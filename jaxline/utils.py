@@ -526,6 +526,10 @@ def evaluate_should_return_dict(f: F) -> F:
   return evaluate_with_warning
 
 
+def _maybe_device_get(x):
+  return jax.device_get(x) if isinstance(x, jnp.ndarray) else x
+
+
 # We use a global dictionary so that multiple different checkpoints can share
 # underlying data.
 GLOBAL_CHECKPOINT_DICT = {}
@@ -571,15 +575,12 @@ class InMemoryCheckpointer:
     active_state = self.get_experiment_state(ckpt_series)
     id_ = 0 if not series.history else series.history[-1].id + 1
     snapshot = copy.copy(active_state)
-    for sk, sv in snapshot.items():
-      # Duck-typing for "is this a Jaxline Experiment class?".
-      if hasattr(sv, "CHECKPOINT_ATTRS"):
-        snapshot[sk] = copy.copy(sv)
-        for kk in sv.CHECKPOINT_ATTRS:
-          attr = getattr(sv, kk)
-          copied_attr = jax.tree_map(
-              lambda x: x.copy() if hasattr(x, 'copy') else x, attr)
-          setattr(sv, kk, copied_attr)
+    # Ensure buffers do not get donated as training loop runs ahead.
+    for k, v in snapshot.items():
+      if k == 'experiment_module':
+        snapshot[k] = copy.copy(v)
+        snapshot_state = jax.tree_map(_maybe_device_get, v.snapshot_state())
+        snapshot[k].restore_from_snapshot(snapshot_state)
     series.history.append(SnapshotNT(id_, snapshot))
     if len(series.history) > self._max_checkpoints_to_keep:
       GLOBAL_CHECKPOINT_DICT[ckpt_series] = series._replace(
