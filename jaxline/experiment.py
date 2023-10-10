@@ -179,33 +179,31 @@ class AbstractExperiment(abc.ABC):
           step_rng, host_id, axis_name="i", mode=config.random_mode_train)
       return global_step, (step_rng, state_rng)
 
-    global_step_devices = np.broadcast_to(state.global_step,
+    global_step_devices = np.broadcast_to(state.global_step - 1,
                                           [jax.local_device_count()])
     host_id_devices = utils.host_id_devices_for_rng(config.random_mode_train)
     if host_id_devices is not None:
       # Transfer to device to avoid host->device transfer on every step.
       host_id_devices = jax.pmap(lambda x: x)(host_id_devices)
 
-    # Get step key for first step, do not update global_step_devices yet.
-    _, (step_key, state.train_step_rng) = next_device_state(
-        global_step_devices, state.train_step_rng, host_id_devices)
-
     with utils.log_activity("training loop"):
       while self.should_run_step(state.global_step, config):
         with jax.profiler.StepTraceAnnotation(
             "train", step_num=state.global_step):
-          scalar_outputs = self.step(
-              global_step=global_step_devices, rng=step_key, writer=writer)
-
-          t = time.time()
-          # Update state's (scalar) global step (for checkpointing).
-          # global_step_devices will be back in sync with this after the call
-          # to next_device_state below.
-          state.global_step += 1
+          # Sync global_step_devices with hosts' step and generate prng key.
           global_step_devices, (step_key, state.train_step_rng) = (
               next_device_state(global_step_devices,
                                 state.train_step_rng,
                                 host_id_devices))
+
+          scalar_outputs = self.step(
+              global_step=global_step_devices, rng=step_key, writer=writer)
+
+          t = time.time()
+          # Update state's global step on hosts (for checkpointing).
+          # Devices' global_step_devices will be back in sync on the next
+          # iteration of the while loop.
+          state.global_step += 1
 
         for action in periodic_actions:
           action(t, state.global_step, scalar_outputs)  # pytype: disable=wrong-arg-types  # jax-ndarray
