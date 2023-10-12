@@ -78,14 +78,17 @@ def train(
   is_checkpointer = config.train_checkpoint_all_hosts or is_chief
 
   rng = jax.random.PRNGKey(config.random_seed)
+
+  train_step_rng, init_rng = jax.random.split(rng)
+
   with utils.log_activity("experiment init"):
     experiment = _initialize_experiment(
-        experiment_class, "train", rng, config.experiment_kwargs)
+        experiment_class, "train", init_rng, config.experiment_kwargs)
 
   state = checkpointer.get_experiment_state("latest")
   state.global_step = 0
   state.experiment_module = experiment
-  state.train_step_rng = experiment.initialize_train_step_rng(rng)
+  state.train_step_rng = experiment.initialize_train_step_rng(train_step_rng)
 
   if checkpointer.can_be_restored("latest"):
     with utils.log_activity("checkpoint restore"):
