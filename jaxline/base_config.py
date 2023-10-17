@@ -135,6 +135,12 @@ def get_base_config():
   config.random_mode_train = "unique_host_unique_device"
   config.random_mode_eval = "same_host_same_device"
 
+  # If True, use the legacy behavior for random seeds where
+  # PRNGKey(config.random_seed) is used for both initialization of the
+  # experiment class and initialization of the training step rng
+  # (without any splitting beforehand).
+  config.legacy_random_seed_behavior = False
+
   # The metric (returned by the step function) used as a fitness score.
   # It saves a separate series of checkpoints corresponding to
   # those which produce a better fitness score than previously seen.
