@@ -23,7 +23,9 @@ from absl.testing import absltest
 from absl.testing import flagsaver
 import jax
 import jax.numpy as jnp
+from jaxline import experiment
 from jaxline import utils
+from ml_collections import config_dict
 import numpy as np
 
 
@@ -398,6 +400,149 @@ class PeriodicActionTest(absltest.TestCase):
     target_data = [200, 400, 600, 800, 1000, 1010]
     self.assertEqual(data, target_data)
 
+
+class DummyExperiment(experiment.AbstractExperiment):
+  """An experiment for testing the checkpointer."""
+
+  CHECKPOINT_ATTRS = {
+      "_params": "params",
+  }
+  NON_BROADCAST_CHECKPOINT_ATTRS = {
+      "_non_bcast_params": "non_bcast_params",
+  }
+
+  def __init__(self, mode: str):
+    super().__init__(mode=mode)
+    self._params = {"a": jnp.array([0])}
+    self._non_bcast_params = {"b": jnp.array(1), "c": 2, "d": None}
+
+  def step(self, **kwargs):
+    """Only needed for API matching."""
+
+  def evaluate(self, *args, **kwargs):
+    """Only need for API matching."""
+
+
+def _get_checkpoint_history():
+  return [utils.SnapshotNT(s.id, s.pickle_nest.to_dict())
+          for s in utils.GLOBAL_CHECKPOINT_DICT["ckpt_series"].history]
+
+
+class TestInMemoryCheckpointer(absltest.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    utils.GLOBAL_CHECKPOINT_DICT = {}
+    config = config_dict.ConfigDict(
+        {"max_checkpoints_to_keep": 5})
+    self._checkpointer = utils.InMemoryCheckpointer(config, "train")
+    self._state = self._checkpointer.get_experiment_state("ckpt_series")
+    self._state.global_step = 0
+    self._state.experiment_module = DummyExperiment("train")
+
+  def test_save_base_case(self):
+    """Tests correct behavior for initial save."""
+
+    self._checkpointer.save("ckpt_series")
+
+    self.assertListEqual(
+        _get_checkpoint_history(), [
+            utils.SnapshotNT(0, {
+                "global_step": 0,
+                "experiment_module": {
+                    "params": {
+                        "a": jnp.array(0)},
+                    "non_bcast_params": {
+                        "b": jnp.array(1),
+                        "c": 2,
+                        "d": None}}}),
+        ])
+
+  def test_save_with_runahead(self):
+    """Tests updating current state doesn't change previous snapshots."""
+
+    self._checkpointer.save("ckpt_series")
+    self._state.experiment_module._params["a"] = jnp.array([1])
+    self._state.experiment_module._non_bcast_params["b"] = jnp.array(2)
+    self._state.experiment_module._non_bcast_params["c"] = 3
+    self._state.global_step += 1
+    self._checkpointer.save("ckpt_series")
+
+    self.assertListEqual(
+        _get_checkpoint_history(), [
+            utils.SnapshotNT(0, {
+                "global_step": 0,
+                "experiment_module": {
+                    "params": {
+                        "a": jnp.array(0)},
+                    "non_bcast_params": {
+                        "b": jnp.array(1),
+                        "c": 2,
+                        "d": None}}}),
+            utils.SnapshotNT(1, {
+                "global_step": 1,
+                "experiment_module": {
+                    "params": {
+                        "a": jnp.array(1)},
+                    "non_bcast_params": {
+                        "b": jnp.array(2),
+                        "c": 3,
+                        "d": None}}}),
+        ])
+
+  def test_restore(self):
+    """Checks that checkpointable state is correctly restored."""
+
+    for i in range(6):
+      self._state.experiment_module._params["a"] = jnp.array([i])
+      self._state.experiment_module._non_bcast_params["b"] = jnp.array(i+1)
+      self._state.global_step += 1
+      self._checkpointer.save("ckpt_series")
+
+    self._checkpointer.restore("ckpt_series")
+    current_state = self._checkpointer.get_experiment_state("ckpt_series")
+    self.assertEqual(current_state.global_step, 6)
+    self.assertEqual(
+        current_state.experiment_module._params["a"], jnp.array([5]))
+    self.assertEqual(
+        current_state.experiment_module._non_bcast_params["b"], jnp.array(6))
+    self.assertEqual(
+        current_state.experiment_module._non_bcast_params["c"], 2)
+    self.assertIsNone(
+        current_state.experiment_module._non_bcast_params["d"])
+
+  def test_max_checkpoints_to_keep(self):
+    """Checks that max_checkpoints_to_keep is respected."""
+
+    for i in range(10):
+      self._state.experiment_module._params["a"] = jnp.array([i])
+      self._state.experiment_module._non_bcast_params["b"] = jnp.array(i+1)
+      self._state.global_step += 1
+      self._checkpointer.save("ckpt_series")
+
+    checkpoint_history = _get_checkpoint_history()
+    self.assertLen(checkpoint_history, 5)
+    self.assertListEqual(
+        [checkpoint_history[0], checkpoint_history[-1]], [
+            utils.SnapshotNT(5, {
+                "global_step": 6,
+                "experiment_module": {
+                    "params": {
+                        "a": jnp.array(5)},
+                    "non_bcast_params": {
+                        "b": jnp.array(6),
+                        "c": 2,
+                        "d": None}}}),
+            utils.SnapshotNT(9, {
+                "global_step": 10,
+                "experiment_module": {
+                    "params": {
+                        "a": jnp.array(9)},
+                    "non_bcast_params": {
+                        "b": jnp.array(10),
+                        "c": 2,
+                        "d": None}}}),
+        ])
 
 if __name__ == "__main__":
   absltest.main()

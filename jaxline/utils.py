@@ -17,7 +17,6 @@
 import collections
 from concurrent import futures
 import contextlib
-import copy
 import enum
 import functools
 import pdb
@@ -291,6 +290,11 @@ def make_async(thread_name_prefix: str = ""):
     del instance
     return pool.submit(trap_errors, *args, **kwargs)
   return decorator
+
+
+def maybe_device_get(x):
+  """Device get tensor if it is a jnp.ndarray."""
+  return jax.device_get(x) if isinstance(x, jnp.ndarray) else x
 
 
 def kwargs_only(f):
@@ -581,22 +585,6 @@ class InMemoryCheckpointer:
     self._max_checkpoints_to_keep = config.max_checkpoints_to_keep
     del mode
 
-  def _override_or_insert(self, current_state, snapshot):
-    """Update the current state based on a snapshot."""
-    for sk, sv in snapshot.items():
-      # Duck-typing for "is this a Jaxline Experiment class?".
-      if (sk in current_state
-          and hasattr(current_state[sk], "CHECKPOINT_ATTRS")
-          and hasattr(current_state[sk], "NON_BROADCAST_CHECKPOINT_ATTRS")):
-        for kk in sv.CHECKPOINT_ATTRS:
-          setattr(current_state[sk], kk, getattr(sv, kk))
-        for kk in sv.NON_BROADCAST_CHECKPOINT_ATTRS:
-          setattr(
-              current_state[sk], kk,
-              jax.tree_util.tree_map(copy.copy, getattr(sv, kk)))
-      else:
-        current_state[sk] = sv
-
   def get_experiment_state(self, ckpt_series: str):
     """Returns the experiment state for a given checkpoint series."""
     if ckpt_series not in GLOBAL_CHECKPOINT_DICT:
@@ -611,10 +599,16 @@ class InMemoryCheckpointer:
   def save(self, ckpt_series: str) -> None:
     """Saves the checkpoint."""
     series = GLOBAL_CHECKPOINT_DICT[ckpt_series]
-    active_state = self.get_experiment_state(ckpt_series)
     id_ = 0 if not series.history else series.history[-1].id + 1
-    snapshot = copy.copy(active_state)
-    series.history.append(SnapshotNT(id_, snapshot))
+    snapshot_state = config_dict.ConfigDict()
+    for k, v in self.get_experiment_state(ckpt_series).items():
+      if k == "experiment_module":
+        snapshot_state[k] = v.snapshot_state()
+      else:
+        snapshot_state[k] = v
+    # Ensure buffers do not get donated as training loop runs ahead.
+    snapshot_state = jax.tree_map(maybe_device_get, snapshot_state)
+    series.history.append(SnapshotNT(id_, snapshot_state))
     if len(series.history) > self._max_checkpoints_to_keep:
       GLOBAL_CHECKPOINT_DICT[ckpt_series] = series._replace(
           history=series.history[-self._max_checkpoints_to_keep:])
@@ -627,9 +621,14 @@ class InMemoryCheckpointer:
 
   def restore(self, ckpt_series: str) -> None:
     """Restores the checkpoint."""
-    snapshot = GLOBAL_CHECKPOINT_DICT[ckpt_series].history[-1].pickle_nest
+    snapshot_state = GLOBAL_CHECKPOINT_DICT[
+        ckpt_series].history[-1].pickle_nest.to_dict()
     current_state = self.get_experiment_state(ckpt_series)
-    self._override_or_insert(current_state, snapshot)
+    for k, v in current_state.items():
+      if k == "experiment_module":
+        v.restore_from_snapshot(snapshot_state[k])
+      else:
+        current_state[k] = snapshot_state[k]
     logging.info("Returned checkpoint %s with id %s.", ckpt_series,
                  GLOBAL_CHECKPOINT_DICT[ckpt_series].history[-1].id)
 
