@@ -469,10 +469,15 @@ class PeriodicAction:
       # Check for logging intervals that come at growth ratios
       growth_log = False
       if self._logging_growth_ratios:
-        exponent = jnp.floor(jnp.log10(jnp.maximum(1, step)))
+        logstep = jnp.log10(jnp.maximum(1, step))
+        if jnp.isclose(jnp.ceil(logstep), logstep, rtol=0.0, atol=1.e-6).item():
+          # jnp.floor(jnp.log10(x)) rounds down for powers of 10.
+          exponent = logstep
+        else:
+          exponent = jnp.floor(logstep)
         valid_ratios = jnp.round(jnp.array(
             [ratio * 10**exponent for ratio in self._logging_growth_ratios]))
-        growth_log = any(jnp.isclose(step, valid_ratios))
+        growth_log = any(jnp.isclose(step, valid_ratios, rtol=0.0))
 
       # Log if a growth logging step *or* divisible by interval
       interval_log = step % self._interval == 0

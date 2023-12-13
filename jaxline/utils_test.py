@@ -325,25 +325,59 @@ class DoubleBufferTest(absltest.TestCase):
     self.assertNotEqual(batch_ptrs[2], batch_ptrs[3])
 
 
+def _run_periodic_growth_logger(
+    interval, logging_growth_ratios, start_step, end_step
+):
+  data = []
+  logger = utils.PeriodicAction(
+      fn=lambda step, _: data.append(step),  # fn logs step to data
+      interval_type="steps",
+      interval=interval,
+      logging_growth_ratios=logging_growth_ratios,
+  )
+
+  for step in range(start_step, end_step):
+    logger(time.time(), step+1, {"fake_data": 0})  # pytype: disable=wrong-arg-types  # jax-ndarray
+  logger.wait_to_finish()
+  return data
+
+
 class PeriodicActionTest(absltest.TestCase):
   """Tests for PeriodicAction."""
 
   def test_log_growth_ratios(self):
     """Checks a specific value of growth ratios logs as expected."""
-    data = []
-    logger = utils.PeriodicAction(
-        fn=lambda step, _: data.append(step),  # fn logs step to data
-        interval_type="steps",
-        interval=1_000_000,  # Large interval won't get called early on.
-        logging_growth_ratios=[1, 2, 5, 10],  # Example growth ratios
+    data = _run_periodic_growth_logger(
+        interval=1_000_000,  # Large interval that won't get called early on.
+        logging_growth_ratios=[1, 2, 5, 10],
+        start_step=0,
+        end_step=1010,
     )
-
-    for step in range(1010):
-      logger(time.time(), step+1, {"fake_data": 0})  # pytype: disable=wrong-arg-types  # jax-ndarray
-    logger.wait_to_finish()
-
-    # Check that we got the results that we expected
     target_data = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
+    self.assertEqual(data, target_data)
+
+  def test_log_growth_ratios_small(self):
+    """Checks a specific value of growth ratios logs as expected."""
+    data = _run_periodic_growth_logger(
+        interval=1_000_000,  # Large interval that won't get called early on.
+        logging_growth_ratios=[1, 2, 5],
+        start_step=0,
+        end_step=1010,
+    )
+    # Should still include powers of 10 even if not in the
+    # logging_growth_ratios!
+    target_data = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
+    self.assertEqual(data, target_data)
+
+  def test_log_growth_ratios_not_triggered_at_large_steps(self):
+    data = _run_periodic_growth_logger(
+        interval=5000,
+        logging_growth_ratios=[1, 2, 3, 4, 5],
+        start_step=399_900,
+        end_step=400_100,
+    )
+    # Should only include steps due to the regular interval.
+    target_data = [400_000]
     self.assertEqual(data, target_data)
 
   def test_log_last_step(self):
